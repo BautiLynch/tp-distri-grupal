@@ -1,4 +1,21 @@
 services:
+  aggregation_0:
+    build:
+      context: ./src/
+      dockerfile: aggregation/Dockerfile
+    container_name: aggregation_0
+    depends_on:
+    - join
+    environment:
+    - AGGREGATION_AMOUNT=1
+    - AGGREGATION_PREFIX=aggregation
+    - ID=0
+    - MOM_HOST=rabbitmq
+    - OUTPUT_QUEUE=join_queue
+    - PYTHONUNBUFFERED=1
+    - TOP_SIZE=20
+    volumes:
+      - ./aggregation/storage:/storage
   rabbitmq:
       build:
         context: ./src/rabbitmq
