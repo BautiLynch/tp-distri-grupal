@@ -67,7 +67,7 @@ class JoinFilter:
         if self.end_event.is_set():
             return
         self.end_event.set()
-        self.input_queue.stop_consuming()
+        self.input_queue.stop_consuming_threadsafe()
         
     def close(self):
         for mom in [self.input_queue, self.output_queue]:
