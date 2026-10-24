@@ -1,17 +1,15 @@
 import heapq
 import os
 import logging
-import bisect
 import signal
 import threading
 
-from common import middleware, message_protocol, word_item
+from common import middleware, message_protocol
 from aggregation.store import Storage
 
 ID = int(os.environ["ID"])
 MOM_HOST = os.environ["MOM_HOST"]
 OUTPUT_QUEUE = os.environ["OUTPUT_QUEUE"]
-AGGREGATION_AMOUNT = int(os.environ["AGGREGATION_AMOUNT"])
 AGGREGATION_PREFIX = os.environ["AGGREGATION_PREFIX"]
 TOP_SIZE = int(os.environ["TOP_SIZE"])
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
@@ -31,11 +29,11 @@ class AggregationFilter:
         self.end_event = threading.Event()
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
-    def _process_eof(self, client):
+    def _process_eof(self, client_id):
         logging.info("Received EOF")
 
         top_words = {}
-        for word in self.storage.load_words(client):
+        for word in self.storage.load_words(client_id):
             top_words[word.word] += word.amount
 
         top_parcial = heapq.nlargest(
@@ -44,7 +42,7 @@ class AggregationFilter:
             key=lambda item: item[1],
         )
 
-        message = [client, top_parcial]
+        message = [client_id, top_parcial]
         self.output_queue.send(message_protocol.internal.serialize(message))
         
 
