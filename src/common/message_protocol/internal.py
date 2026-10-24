@@ -1,5 +1,3 @@
-from io import BytesIO
-
 from . import external
 
 
@@ -65,14 +63,35 @@ def serialize_end_of_records(client_id):
     return _serialize(MsgType.END_OF_RECORDS, client_id, INPUT_QUERY_ID, b"")
 
 
+def _deserialize_text(payload, offset):
+    size_end = offset + UINT32_SIZE
+    if size_end > len(payload):
+        raise ValueError("Incomplete article field length")
+    size = int.from_bytes(payload[offset:size_end], byteorder="big")
+    value_end = size_end + size
+    if value_end > len(payload):
+        raise ValueError("Incomplete article field")
+    value = payload[size_end:value_end].decode("utf-8")
+    return value, value_end
+
+
 def deserialize_input(message):
     message_type, client_id, _, payload = _deserialize(message)
     if message_type == MsgType.END_OF_RECORDS:
         return message_type, client_id, None
     if message_type != MsgType.ARTICLE:
         raise ValueError("Unknown internal input type")
-    with BytesIO(payload) as reader:
-        article = external._read_article(reader.read)
-        if reader.read(1):
-            raise ValueError("Unexpected bytes after the article")
+    if len(payload) < UINT32_SIZE:
+        raise ValueError("Incomplete article field count")
+    field_count = int.from_bytes(payload[:UINT32_SIZE], byteorder="big")
+    offset = UINT32_SIZE
+    article = {}
+    for _ in range(field_count):
+        name, offset = _deserialize_text(payload, offset)
+        value, offset = _deserialize_text(payload, offset)
+        if name in article:
+            raise ValueError("Repeated article field")
+        article[name] = value
+    if offset != len(payload):
+        raise ValueError("Unexpected bytes after the article")
     return message_type, client_id, article

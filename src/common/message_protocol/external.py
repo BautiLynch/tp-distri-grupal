@@ -8,18 +8,14 @@ class MsgType:
 UINT32_SIZE = 4
 
 
-def _read_all(read, size):
+def recv_all(connection, size):
     data = bytearray()
     while len(data) < size:
-        chunk = read(size - len(data))
+        chunk = connection.recv(size - len(data))
         if not chunk:
-            raise EOFError(f"End of data after {len(data)} of {size} bytes")
+            raise EOFError(f"Connection closed after {len(data)} of {size} bytes")
         data += chunk
     return bytes(data)
-
-
-def recv_all(connection, size):
-    return _read_all(connection.recv, size)
 
 
 def send_all(connection, data):
@@ -31,12 +27,8 @@ def send_all(connection, data):
         view = view[sent:]
 
 
-def _read_uint32(read):
-    return int.from_bytes(_read_all(read, UINT32_SIZE), byteorder="big")
-
-
 def _recv_uint32(connection):
-    return _read_uint32(connection.recv)
+    return int.from_bytes(recv_all(connection, UINT32_SIZE), byteorder="big")
 
 
 def _serialize_uint32(value):
@@ -59,9 +51,9 @@ def _serialize_client_id(client_id):
     return _serialize_uint32(client_id)
 
 
-def _read_bytes(read):
-    size = _read_uint32(read)
-    return _read_all(read, size)
+def _recv_bytes(connection):
+    size = _recv_uint32(connection)
+    return recv_all(connection, size)
 
 
 def _serialize_bytes(value):
@@ -70,28 +62,24 @@ def _serialize_bytes(value):
     return _serialize_uint32(len(value)) + value
 
 
-def _read_text(read):
-    return _read_bytes(read).decode("utf-8")
+def _recv_text(connection):
+    return _recv_bytes(connection).decode("utf-8")
 
 
 def _serialize_text(value):
     return _serialize_bytes(value.encode("utf-8"))
 
 
-def _read_article(read):
-    field_count = _read_uint32(read)
+def _recv_article(connection):
+    field_count = _recv_uint32(connection)
     article = {}
     for _ in range(field_count):
-        name = _read_text(read)
-        value = _read_text(read)
+        name = _recv_text(connection)
+        value = _recv_text(connection)
         if name in article:
             raise ValueError("Repeated article field")
         article[name] = value
     return article
-
-
-def _recv_article(connection):
-    return _read_article(connection.recv)
 
 
 def _serialize_article(article):
