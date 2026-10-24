@@ -6,6 +6,7 @@ class MsgType:
 
 
 UINT32_SIZE = 4
+MAX_CLIENT_ID = (1 << (UINT32_SIZE * 8)) - 1
 
 
 def recv_all(connection, size):
@@ -32,9 +33,23 @@ def _recv_uint32(connection):
 
 
 def _serialize_uint32(value):
-    if type(value) is not int or not 0 <= value <= 0xFFFFFFFF:
-        raise ValueError("Expected an unsigned 32-bit integer")
     return value.to_bytes(UINT32_SIZE, byteorder="big")
+
+
+def _validate_id(client_id):
+    if type(client_id) is not int or not 0 < client_id <= MAX_CLIENT_ID:
+        raise ValueError("Client ID must be a positive unsigned 32-bit integer")
+
+
+def _recv_client_id(connection):
+    client_id = _recv_uint32(connection)
+    _validate_id(client_id)
+    return client_id
+
+
+def _serialize_client_id(client_id):
+    _validate_id(client_id)
+    return _serialize_uint32(client_id)
 
 
 def _recv_bytes(connection):
@@ -89,22 +104,17 @@ def _serialize_empty():
 
 RECV_MSG_HANDLERS = {
     MsgType.ARTICLE: _recv_article,
-    MsgType.CLIENT_ID: _recv_uint32,
+    MsgType.CLIENT_ID: _recv_client_id,
     MsgType.ACK: _recv_empty,
     MsgType.END_OF_RECORDS: _recv_empty,
 }
 
 SEND_MSG_HANDLERS = {
     MsgType.ARTICLE: _serialize_article,
-    MsgType.CLIENT_ID: _serialize_uint32,
+    MsgType.CLIENT_ID: _serialize_client_id,
     MsgType.ACK: _serialize_empty,
     MsgType.END_OF_RECORDS: _serialize_empty,
 }
-
-
-def _validate_id(message_type, value):
-    if message_type == MsgType.CLIENT_ID and value == 0:
-        raise ValueError("Client ID must be positive")
 
 
 def recv_msg(connection):
@@ -112,14 +122,15 @@ def recv_msg(connection):
     if message_type not in RECV_MSG_HANDLERS:
         raise ValueError("Unknown message type")
     message = RECV_MSG_HANDLERS[message_type](connection)
-    _validate_id(message_type, message)
     return message_type, message
 
 
-def send_msg(connection, message_type, *args):
+def serialize_msg(message_type, *args):
     if message_type not in SEND_MSG_HANDLERS:
         raise ValueError("Unknown message type")
     payload = SEND_MSG_HANDLERS[message_type](*args)
-    if args:
-        _validate_id(message_type, args[0])
-    send_all(connection, _serialize_uint32(message_type) + payload)
+    return _serialize_uint32(message_type) + payload
+
+
+def send_msg(connection, message_type, *args):
+    send_all(connection, serialize_msg(message_type, *args))

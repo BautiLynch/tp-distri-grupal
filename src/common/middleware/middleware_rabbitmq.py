@@ -81,11 +81,8 @@ class _MessageMiddlewareRabbitMQBase:
     def stop_consuming_threadsafe(self):
         """Detiene el consumo de forma segura entre hilos. Este método puede llamarse desde un hilo distinto al que está ejecutando start_consuming()."""
         
-        if not self._consuming:
-            return
         try:
-            self.conn.add_callback_threadsafe(lambda: self.chan.stop_consuming())
-            self._consuming = False
+            self.conn.add_callback_threadsafe(self.stop_consuming)
         except Exception:
             try:
                 self.stop_consuming()
@@ -125,3 +122,14 @@ class MessageMiddlewareExchangeRabbitMQ(_MessageMiddlewareRabbitMQBase, MessageM
                 queue=self.queue_name,
                 routing_key=routing_key,
             )
+
+    def send_rk(self, message, routing_key):
+        try:
+            with self._publish_lock:
+                self.chan.basic_publish(
+                    exchange=self.exchange, routing_key=routing_key, body=message
+                )
+        except AMQPConnectionError:
+            raise MessageMiddlewareDisconnectedError
+        except AMQPError:
+            raise MessageMiddlewareMessageError
