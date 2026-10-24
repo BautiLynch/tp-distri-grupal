@@ -104,6 +104,7 @@ class MessageMiddlewareQueueRabbitMQ(_MessageMiddlewareRabbitMQBase, MessageMidd
 
     def _declare_topology(self):
         self.chan.queue_declare(queue=self.routing_keys[0], durable=True)
+        self.chan.basic_qos(prefetch_count=1)
 
 
 class MessageMiddlewareExchangeRabbitMQ(_MessageMiddlewareRabbitMQBase, MessageMiddlewareExchange):

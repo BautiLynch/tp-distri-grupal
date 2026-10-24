@@ -3,17 +3,35 @@ import logging
 import socket
 import signal
 import multiprocessing
-from common import message_protocol
+from common import middleware, message_protocol
 
 SERVER_HOST = os.environ["SERVER_HOST"]
 SERVER_PORT = int(os.environ["SERVER_PORT"])
+MOM_HOST = os.environ["MOM_HOST"]
+FILTER_QUEUE = os.environ["FILTER_QUEUE"]
+SPLITTER_QUEUE = os.environ["SPLITTER_QUEUE"]
+
+FITLER_FIELDS = ("date_modified", "image", "in_language", "name", "sections", "url")
+SPLITTER_FIELDS = ("abstract", "date_modified", "in_language", "name", "sections", "url")
+
+
+def filter_article_fields(article, fields):
+    filtered_article = {}
+    for name, value in article.items():
+        if name in fields:
+            filtered_article[name] = value
+    return filtered_article
 
 
 def handle_client_request(client_socket, client_id, client_dict, sigterm_received):
+    filter_queue = None
+    splitter_queue = None
     try:
         message_protocol.external.send_msg(
             client_socket, message_protocol.external.MsgType.CLIENT_ID, client_id
         )
+        filter_queue = middleware.MessageMiddlewareQueueRabbitMQ(MOM_HOST, FILTER_QUEUE)
+        splitter_queue = middleware.MessageMiddlewareQueueRabbitMQ(MOM_HOST, SPLITTER_QUEUE)
         while True:
             message_type, article = message_protocol.external.recv_msg(client_socket)
             if message_type not in (
@@ -21,15 +39,32 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
                 message_protocol.external.MsgType.END_OF_RECORDS,
             ):
                 raise ValueError("Expected an article or end of records")
-            # TODO: serialize with client_id and publish to the two input groups.
-            # Send ACK only after publication; keep all article fields for now.
-            raise NotImplementedError("Internal message publication is pending")
+            if message_type == message_protocol.external.MsgType.ARTICLE:
+                filter_queue.send(
+                    message_protocol.internal.serialize_article(client_id, filter_article_fields(article, FITLER_FIELDS))
+                )
+                splitter_queue.send(
+                    message_protocol.internal.serialize_article(client_id, filter_article_fields(article, SPLITTER_FIELDS))
+                )
+            else:
+                end_of_records = message_protocol.internal.serialize_end_of_records(client_id)
+                filter_queue.send(end_of_records)
+                splitter_queue.send(end_of_records)
+            message_protocol.external.send_msg(client_socket, message_protocol.external.MsgType.ACK)
+            if message_type == message_protocol.external.MsgType.END_OF_RECORDS:
+                break
     except (socket.error, EOFError) as e:
         if not sigterm_received.value:
             logging.error("Client %s disconnected: %s", client_id, e)
     except Exception as e:
         logging.error("Client %s: %s", client_id, e)
     finally:
+        for queue in (filter_queue, splitter_queue):
+            if queue is not None:
+                try:
+                    queue.close()
+                except Exception:
+                    logging.exception("Could not close a gateway output queue")
         try:
             client_socket.shutdown(socket.SHUT_RDWR)
         except socket.error as e:

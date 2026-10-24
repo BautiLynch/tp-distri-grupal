@@ -6,17 +6,20 @@ class MsgType:
 
 
 UINT32_SIZE = 4
-MAX_CLIENT_ID = (1 << (UINT32_SIZE * 8)) - 1
+
+
+def _read_all(read, size):
+    data = bytearray()
+    while len(data) < size:
+        chunk = read(size - len(data))
+        if not chunk:
+            raise EOFError(f"End of data after {len(data)} of {size} bytes")
+        data += chunk
+    return bytes(data)
 
 
 def recv_all(connection, size):
-    data = bytearray()
-    while len(data) < size:
-        chunk = connection.recv(size - len(data))
-        if not chunk:
-            raise EOFError(f"Connection closed after {len(data)} of {size} bytes")
-        data += chunk
-    return bytes(data)
+    return _read_all(connection.recv, size)
 
 
 def send_all(connection, data):
@@ -28,8 +31,12 @@ def send_all(connection, data):
         view = view[sent:]
 
 
+def _read_uint32(read):
+    return int.from_bytes(_read_all(read, UINT32_SIZE), byteorder="big")
+
+
 def _recv_uint32(connection):
-    return int.from_bytes(recv_all(connection, UINT32_SIZE), byteorder="big")
+    return _read_uint32(connection.recv)
 
 
 def _serialize_uint32(value):
@@ -37,8 +44,8 @@ def _serialize_uint32(value):
 
 
 def _validate_id(client_id):
-    if type(client_id) is not int or not 0 < client_id <= MAX_CLIENT_ID:
-        raise ValueError("Client ID must be a positive unsigned 32-bit integer")
+    if type(client_id) is not int or client_id <= 0:
+        raise ValueError("Client ID must be a positive integer")
 
 
 def _recv_client_id(connection):
@@ -52,9 +59,9 @@ def _serialize_client_id(client_id):
     return _serialize_uint32(client_id)
 
 
-def _recv_bytes(connection):
-    size = _recv_uint32(connection)
-    return recv_all(connection, size)
+def _read_bytes(read):
+    size = _read_uint32(read)
+    return _read_all(read, size)
 
 
 def _serialize_bytes(value):
@@ -63,24 +70,28 @@ def _serialize_bytes(value):
     return _serialize_uint32(len(value)) + value
 
 
-def _recv_text(connection):
-    return _recv_bytes(connection).decode("utf-8")
+def _read_text(read):
+    return _read_bytes(read).decode("utf-8")
 
 
 def _serialize_text(value):
     return _serialize_bytes(value.encode("utf-8"))
 
 
-def _recv_article(connection):
-    field_count = _recv_uint32(connection)
+def _read_article(read):
+    field_count = _read_uint32(read)
     article = {}
     for _ in range(field_count):
-        name = _recv_text(connection)
-        value = _recv_text(connection)
+        name = _read_text(read)
+        value = _read_text(read)
         if name in article:
             raise ValueError("Repeated article field")
         article[name] = value
     return article
+
+
+def _recv_article(connection):
+    return _read_article(connection.recv)
 
 
 def _serialize_article(article):

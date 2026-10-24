@@ -1,12 +1,17 @@
+from io import BytesIO
+
 from . import external
 
 
 class MsgType:
     RESULT = 1
     QUERY_END = 2
+    ARTICLE = 3
+    END_OF_RECORDS = 4
 
 
 QUERY_COUNT = 5
+INPUT_QUERY_ID = 0
 UINT32_SIZE = 4
 MESSAGE_TYPE_OFFSET = 0
 CLIENT_ID_OFFSET = MESSAGE_TYPE_OFFSET + UINT32_SIZE
@@ -35,9 +40,9 @@ def serialize_query_end(client_id, query_id):
     return _serialize(MsgType.QUERY_END, client_id, query_id, b"")
 
 
-def deserialize_result(message):
+def _deserialize(message):
     if len(message) < HEADER_SIZE:
-        raise ValueError("Incomplete internal result header")
+        raise ValueError("Incomplete internal header")
     message_type = int.from_bytes(message[MESSAGE_TYPE_OFFSET:CLIENT_ID_OFFSET], byteorder="big")
     client_id = int.from_bytes(message[CLIENT_ID_OFFSET:QUERY_ID_OFFSET], byteorder="big")
     query_id = int.from_bytes(message[QUERY_ID_OFFSET:PAYLOAD_SIZE_OFFSET], byteorder="big")
@@ -46,3 +51,28 @@ def deserialize_result(message):
         raise ValueError("Internal payload length does not match the message")
     payload = message[HEADER_SIZE:]
     return message_type, client_id, query_id, payload
+
+
+def deserialize_result(message):
+    return _deserialize(message)
+
+
+def serialize_article(client_id, article):
+    return _serialize(MsgType.ARTICLE, client_id, INPUT_QUERY_ID, external._serialize_article(article))
+
+
+def serialize_end_of_records(client_id):
+    return _serialize(MsgType.END_OF_RECORDS, client_id, INPUT_QUERY_ID, b"")
+
+
+def deserialize_input(message):
+    message_type, client_id, _, payload = _deserialize(message)
+    if message_type == MsgType.END_OF_RECORDS:
+        return message_type, client_id, None
+    if message_type != MsgType.ARTICLE:
+        raise ValueError("Unknown internal input type")
+    with BytesIO(payload) as reader:
+        article = external._read_article(reader.read)
+        if reader.read(1):
+            raise ValueError("Unexpected bytes after the article")
+    return message_type, client_id, article
