@@ -52,6 +52,11 @@ class MessageMiddlewareExchange(MessageMiddleware):
 	def __init__(self, host, exchange_name, routing_keys):
 		pass
 
+	#Envía un mensaje al exchange usando solamente la routing key indicada.
+	@abstractmethod
+	def send_rk(self, message, routing_key):
+		pass
+
 class MessageMiddlewareQueue(MessageMiddleware):
 	@abstractmethod
 	def __init__(self, host, queue_name):

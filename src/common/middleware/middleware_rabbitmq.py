@@ -122,3 +122,14 @@ class MessageMiddlewareExchangeRabbitMQ(_MessageMiddlewareRabbitMQBase, MessageM
                 queue=self.queue_name,
                 routing_key=routing_key,
             )
+
+    def send_rk(self, message, routing_key):
+        try:
+            with self._publish_lock:
+                self.chan.basic_publish(
+                    exchange=self.exchange, routing_key=routing_key, body=message
+                )
+        except AMQPConnectionError:
+            raise MessageMiddlewareDisconnectedError
+        except AMQPError:
+            raise MessageMiddlewareMessageError
