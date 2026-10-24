@@ -5,16 +5,15 @@ import threading
 
 from common import middleware, message_protocol
 
-ID = int(os.environ["ID"])
 MOM_HOST = os.environ["MOM_HOST"]
 OUTPUT_QUEUE = os.environ["OUTPUT_QUEUE"]
-SPLITTER_PREFIX = os.environ["SPLITTER_PREFIX"]
+INPUT_QUEUE = os.environ["INPUT_QUEUE"]
 STOPWORDS_PATH = os.environ.get("STOPWORDS_PATH", "stopwords")
 
 class Splitter:
     def __init__(self):
-        self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, SPLITTER_PREFIX, [f"{SPLITTER_PREFIX}_{ID}"]
+        self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
+            MOM_HOST, INPUT_QUEUE
         )
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, OUTPUT_QUEUE
@@ -68,7 +67,7 @@ class Splitter:
         ack()
 
     def close(self):
-        for mom in [self.input_exchange, self.output_queue]:
+        for mom in [self.input_queue, self.output_queue]:
             try:
                 mom.close()
             except Exception as e:
@@ -76,7 +75,7 @@ class Splitter:
 
     def start(self):
         try:
-            self.input_exchange.start_consuming(self.process_message)
+            self.input_queue.start_consuming(self.process_message)
         finally:
             self.close()
 
@@ -84,7 +83,7 @@ class Splitter:
         if self.end_event.is_set():
             return
         self.end_event.set()
-        self.input_exchange.stop_consuming_threadsafe()
+        self.input_queue.stop_consuming_threadsafe()
 
 def main():
     logging.basicConfig(level=logging.INFO)

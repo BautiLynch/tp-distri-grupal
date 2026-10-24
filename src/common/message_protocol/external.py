@@ -6,7 +6,6 @@ class MsgType:
 
 
 UINT32_SIZE = 4
-MAX_CLIENT_ID = (1 << (UINT32_SIZE * 8)) - 1
 
 
 def recv_all(connection, size):
@@ -37,8 +36,8 @@ def _serialize_uint32(value):
 
 
 def _validate_id(client_id):
-    if type(client_id) is not int or not 0 < client_id <= MAX_CLIENT_ID:
-        raise ValueError("Client ID must be a positive unsigned 32-bit integer")
+    if type(client_id) is not int or client_id <= 0:
+        raise ValueError("Client ID must be a positive integer")
 
 
 def _recv_client_id(connection):
