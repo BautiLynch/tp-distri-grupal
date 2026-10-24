@@ -29,11 +29,11 @@ class AggregationFilter:
         self.end_event = threading.Event()
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
-    def _process_eof(self, client):
+    def _process_eof(self, client_id):
         logging.info("Received EOF")
 
         top_words = {}
-        for word in self.storage.load_words(client):
+        for word in self.storage.load_words(client_id):
             top_words[word.word] += word.amount
 
         top_parcial = heapq.nlargest(
@@ -42,7 +42,7 @@ class AggregationFilter:
             key=lambda item: item[1],
         )
 
-        message = [client, top_parcial]
+        message = [client_id, top_parcial]
         self.output_queue.send(message_protocol.internal.serialize(message))
         
 
