@@ -2,8 +2,6 @@ import os
 import logging
 import signal
 import threading
-import nltk
-from nltk.corpus import stopwords
 
 from common import middleware, message_protocol
 
