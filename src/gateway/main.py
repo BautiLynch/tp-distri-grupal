@@ -8,10 +8,25 @@ from common import middleware, message_protocol
 SERVER_HOST = os.environ["SERVER_HOST"]
 SERVER_PORT = int(os.environ["SERVER_PORT"])
 MOM_HOST = os.environ["MOM_HOST"]
-FILTER_QUEUE = os.environ["FILTER_QUEUE"]
+FILTER_PREFIX = os.environ["FILTER_PREFIX"]
+FILTER_AMOUNT = int(os.environ["FILTER_AMOUNT"])
 SPLITTER_QUEUE = os.environ["SPLITTER_QUEUE"]
 
-FITLER_FIELDS = ("date_modified", "image", "in_language", "name", "sections", "url")
+if FILTER_AMOUNT < 1:
+    raise ValueError("FILTER_AMOUNT must be greater than zero")
+
+FILTER_FIELDS = (
+    "creation_date",
+    "date_created",
+    "date_modified",
+    "image",
+    "in_language",
+    "language",
+    "modification_date",
+    "name",
+    "sections",
+    "url",
+)
 SPLITTER_FIELDS = ("abstract", "date_modified", "in_language", "name", "sections", "url")
 
 
@@ -23,15 +38,28 @@ def filter_article_fields(article, fields):
     return filtered_article
 
 
+def filter_routing_key(index):
+    return f"{FILTER_PREFIX}_{index % FILTER_AMOUNT}"
+
+
+def filter_routing_keys():
+    return [f"{FILTER_PREFIX}_{index}" for index in range(FILTER_AMOUNT)]
+
+
 def handle_client_request(client_socket, client_id, client_dict, sigterm_received):
-    filter_queue = None
+    filter_exchange = None
     splitter_queue = None
+    article_index = 0
     try:
         message_protocol.external.send_msg(
             client_socket, message_protocol.external.MsgType.CLIENT_ID, client_id
         )
-        filter_queue = middleware.MessageMiddlewareQueueRabbitMQ(MOM_HOST, FILTER_QUEUE)
-        splitter_queue = middleware.MessageMiddlewareQueueRabbitMQ(MOM_HOST, SPLITTER_QUEUE)
+        filter_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, FILTER_PREFIX, []
+        )
+        splitter_queue = middleware.MessageMiddlewareQueueRabbitMQ(
+            MOM_HOST, SPLITTER_QUEUE
+        )
         while True:
             message_type, article = message_protocol.external.recv_msg(client_socket)
             if message_type not in (
@@ -40,17 +68,30 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
             ):
                 raise ValueError("Expected an article or end of records")
             if message_type == message_protocol.external.MsgType.ARTICLE:
-                filter_queue.send(
-                    message_protocol.internal.serialize_article(client_id, filter_article_fields(article, FITLER_FIELDS))
+                filter_exchange.send_rk(
+                    message_protocol.internal.serialize_article(
+                        client_id,
+                        filter_article_fields(article, FILTER_FIELDS),
+                    ),
+                    filter_routing_key(article_index),
                 )
+                article_index += 1
                 splitter_queue.send(
-                    message_protocol.internal.serialize_article(client_id, filter_article_fields(article, SPLITTER_FIELDS))
+                    message_protocol.internal.serialize_article(
+                        client_id,
+                        filter_article_fields(article, SPLITTER_FIELDS),
+                    )
                 )
             else:
-                end_of_records = message_protocol.internal.serialize_end_of_records(client_id)
-                filter_queue.send(end_of_records)
+                end_of_records = message_protocol.internal.serialize_end_of_records(
+                    client_id
+                )
+                for routing_key in filter_routing_keys():
+                    filter_exchange.send_rk(end_of_records, routing_key)
                 splitter_queue.send(end_of_records)
-            message_protocol.external.send_msg(client_socket, message_protocol.external.MsgType.ACK)
+            message_protocol.external.send_msg(
+                client_socket, message_protocol.external.MsgType.ACK
+            )
             if message_type == message_protocol.external.MsgType.END_OF_RECORDS:
                 break
     except (socket.error, EOFError) as e:
@@ -59,12 +100,12 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
     except Exception as e:
         logging.error("Client %s: %s", client_id, e)
     finally:
-        for queue in (filter_queue, splitter_queue):
-            if queue is not None:
+        for mom in (filter_exchange, splitter_queue):
+            if mom is not None:
                 try:
-                    queue.close()
+                    mom.close()
                 except Exception:
-                    logging.exception("Could not close a gateway output queue")
+                    logging.exception("Could not close a gateway output connection")
         try:
             client_socket.shutdown(socket.SHUT_RDWR)
         except socket.error as e:
