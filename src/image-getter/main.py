@@ -35,6 +35,7 @@ class ImageGetter:
             self._get_image(*fields)
         elif len(fields) == 1:
             logging.info("Received EOF")
+            self.output_queue.send(message)
         else:
             nack()
             return
