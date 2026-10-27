@@ -3,7 +3,7 @@ import logging
 import signal
 import threading
 
-from common import middleware, message_protocol, word_item
+from common import middleware, message_protocol, key_item
 
 MOM_HOST = os.environ["MOM_HOST"]
 INPUT_QUEUE = os.environ["INPUT_QUEUE"]
@@ -30,7 +30,7 @@ class JoinFilter:
     def _process_data(self, client, top_parcial):
         new_words = []
         for word, amount in top_parcial:
-            new_words.append(word_item.WordItem(word, int(amount)))
+            new_words.append(key_item.WordItem(word, int(amount)))
         
         top_client = self.top_by_client.get(client, [])
         top_client.extend(new_words)
