@@ -10,7 +10,6 @@ ID = int(os.environ["ID"])
 MOM_HOST = os.environ["MOM_HOST"]
 OUTPUT_QUEUE = os.environ["OUTPUT_QUEUE"]
 AVERAGE_PREFIX = os.environ["AVERAGE_PREFIX"]
-TOP_SIZE = int(os.environ["TOP_SIZE"])
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
 
 
