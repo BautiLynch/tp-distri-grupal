@@ -11,16 +11,24 @@ SERVER_PORT = int(os.environ["SERVER_PORT"])
 MOM_HOST = os.environ["MOM_HOST"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 
+QUERY_ID = 1
+
 
 class ClientHandler:
     def __init__(self, client_socket):
         self.client_socket = client_socket
         self.input_exchange = None
-        self.completed_queries = set()
+        self.query_replicas = int(os.environ.get("QUERY_REPLICAS", "1"))
+        if self.query_replicas < 1:
+            raise ValueError("QUERY_REPLICAS must be greater than zero")
+        self.query_end_count = 0
+        self.finished = False
         self.stopping = False
 
     def run(self):
-        message_type, client_id = message_protocol.external.recv_msg(self.client_socket)
+        message_type, client_id = message_protocol.external.recv_msg(
+            self.client_socket
+        )
         if message_type != message_protocol.external.MsgType.CLIENT_ID:
             raise ValueError("Expected a client ID to register the connection")
         if self.stopping:
@@ -28,23 +36,37 @@ class ClientHandler:
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [str(client_id)]
         )
-        logging.info("Client %s has result queue %s", client_id, self.input_exchange.queue_name)
+        logging.info(
+            "Client %s has result queue %s",
+            client_id,
+            self.input_exchange.queue_name,
+        )
         if self.stopping:
             return
-        
-        message_protocol.external.send_msg(self.client_socket, message_protocol.external.MsgType.ACK)
+
+        message_protocol.external.send_msg(
+            self.client_socket,
+            message_protocol.external.MsgType.ACK,
+        )
         self.input_exchange.start_consuming(self.handle_result)
 
     def handle_result(self, message, ack, nack):
         try:
-            message_type, _, query_id, payload = message_protocol.internal.deserialize_result(message)
+            message_type, _, query_id, payload = (
+                message_protocol.internal.deserialize_result(message)
+            )
+            if query_id != QUERY_ID:
+                raise ValueError(f"Unexpected query id: {query_id}")
+
             if message_type == message_protocol.internal.MsgType.RESULT:
                 message_protocol.external.send_all(self.client_socket, payload)
             elif message_type == message_protocol.internal.MsgType.QUERY_END:
-                self.completed_queries.add(query_id)
-                if len(self.completed_queries) == message_protocol.internal.QUERY_COUNT:
+                self.query_end_count += 1
+                if not self.finished and self.query_end_count >= self.query_replicas:
+                    self.finished = True
                     message_protocol.external.send_msg(
-                        self.client_socket, message_protocol.external.MsgType.END_OF_RECORDS
+                        self.client_socket,
+                        message_protocol.external.MsgType.END_OF_RECORDS,
                     )
             else:
                 raise ValueError("Unknown internal message type")
@@ -52,7 +74,7 @@ class ClientHandler:
             nack()
             raise
         ack()
-        if len(self.completed_queries) == message_protocol.internal.QUERY_COUNT:
+        if self.finished:
             self.input_exchange.stop_consuming()
 
     def handle_sigterm(self, signum, frame):

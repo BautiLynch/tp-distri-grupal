@@ -115,6 +115,8 @@ class MessageMiddlewareExchangeRabbitMQ(_MessageMiddlewareRabbitMQBase, MessageM
         self.chan.exchange_declare(
             exchange=self.exchange, exchange_type="direct", durable=True
         )
+        if not self.routing_keys:
+            return
         result = self.chan.queue_declare(queue="", exclusive=True)
         self.queue_name = result.method.queue
         for routing_key in self.routing_keys:
