@@ -58,13 +58,11 @@ class FakeOutputExchange:
 
 def make_article(
     language="en",
-    creation_date="2015-03-10",
     modification_date="2020-12-31",
     url="http://example.com/article",
 ):
     return {
         "url": url,
-        "creation_date": creation_date,
         "modification_date": modification_date,
         "language": language,
     }
@@ -111,10 +109,7 @@ class YearLanguageFilterTests(unittest.TestCase):
         instance, output, _ = build_filter()
         message = message_protocol.internal.serialize_article(
             1,
-            make_article(
-                creation_date="2015-03-10",
-                modification_date="2024-06-01",
-            ),
+            make_article(modification_date="2019-06-01"),
         )
 
         acked, nacked = process(instance, message)
@@ -133,21 +128,18 @@ class YearLanguageFilterTests(unittest.TestCase):
                 message_protocol.external.MsgType.ARTICLE,
                 {
                     "url": "http://example.com/article",
-                    "date_modified": "2024-06-01",
+                    "date_modified": "2019-06-01",
                 },
             ),
         )
 
-    def test_filters_by_creation_date_not_modification_date(self):
+    def test_filters_by_modification_date(self):
         instance, output, _ = build_filter()
         process(
             instance,
             message_protocol.internal.serialize_article(
                 1,
-                make_article(
-                    creation_date="2021-01-01",
-                    modification_date="2019-01-01",
-                ),
+                make_article(modification_date="2021-01-01"),
             ),
         )
 
@@ -158,17 +150,17 @@ class YearLanguageFilterTests(unittest.TestCase):
         process(
             instance,
             message_protocol.internal.serialize_article(
-                1, make_article(creation_date="2020-12-31")
+                1, make_article(modification_date="2020-12-31")
             ),
         )
         self.assertEqual(len(output.messages), 1)
 
-    def test_discards_article_written_after_max_year(self):
+    def test_discards_article_modified_after_max_year(self):
         instance, output, _ = build_filter()
         acked, nacked = process(
             instance,
             message_protocol.internal.serialize_article(
-                1, make_article(creation_date="2021-01-01")
+                1, make_article(modification_date="2021-01-01")
             ),
         )
 
@@ -176,12 +168,11 @@ class YearLanguageFilterTests(unittest.TestCase):
         self.assertFalse(nacked)
         self.assertEqual(output.messages, [])
 
-    def test_non_matching_article_does_not_need_modification_date(self):
+    def test_non_matching_language_does_not_need_modification_date(self):
         instance, output, _ = build_filter()
         article = {
-            "url": "http://example.com/after-max-year",
-            "creation_date": "2021-01-01",
-            "language": "en",
+            "url": "http://example.com/wrong-language",
+            "language": "fr",
         }
 
         acked, nacked = process(
@@ -197,8 +188,7 @@ class YearLanguageFilterTests(unittest.TestCase):
         instance, output, _ = build_filter()
         article = {
             "url": "http://example.com/empty-language",
-            "creation_date": "2019-02-03",
-            "modification_date": "2024-05-06",
+            "modification_date": "2019-05-06",
             "language": "",
             "in_language": "en",
         }
@@ -217,24 +207,24 @@ class YearLanguageFilterTests(unittest.TestCase):
         rejected = ("12020", "20201231", "1577836800")
 
         for value in accepted:
-            with self.subTest(creation_date=value):
+            with self.subTest(modification_date=value):
                 instance, output, _ = build_filter()
                 process(
                     instance,
                     message_protocol.internal.serialize_article(
-                        1, make_article(creation_date=value)
+                        1, make_article(modification_date=value)
                     ),
                 )
                 self.assertEqual(len(output.messages), 1)
 
         for value in rejected:
-            with self.subTest(creation_date=value):
+            with self.subTest(modification_date=value):
                 instance, output, _ = build_filter()
                 with self.assertLogs(level="WARNING"):
                     process(
                         instance,
                         message_protocol.internal.serialize_article(
-                            1, make_article(creation_date=value)
+                            1, make_article(modification_date=value)
                         ),
                     )
                 self.assertEqual(output.messages, [])
@@ -260,12 +250,12 @@ class YearLanguageFilterTests(unittest.TestCase):
 
     def test_discards_invalid_dates(self):
         cases = (
-            ("creation_date", "unknown", "invalid creation date"),
-            ("modification_date", "n/a", "invalid modification date"),
-            ("modification_date", "", "invalid modification date"),
+            ("modification_date", "unknown"),
+            ("modification_date", "n/a"),
+            ("modification_date", ""),
         )
 
-        for field, value, fragment in cases:
+        for field, value in cases:
             with self.subTest(field=field, value=value):
                 instance, output, _ = build_filter()
                 with self.assertLogs(level="WARNING") as captured:
@@ -279,7 +269,7 @@ class YearLanguageFilterTests(unittest.TestCase):
                 self.assertTrue(acked)
                 self.assertFalse(nacked)
                 self.assertEqual(output.messages, [])
-                self.assertIn(fragment, captured.output[0])
+                self.assertIn("invalid modification date", captured.output[0])
 
     def test_streams_each_match_without_waiting_for_eof(self):
         instance, output, _ = build_filter()
@@ -328,12 +318,11 @@ class YearLanguageFilterTests(unittest.TestCase):
             ),
         )
 
-    def test_accepts_gateway_field_aliases(self):
+    def test_accepts_modification_date_field(self):
         instance, output, _ = build_filter()
         article = {
             "url": "http://example.com/aliases",
-            "date_created": "2019-02-03",
-            "date_modified": "2024-05-06",
+            "modification_date": "2019-05-06",
             "in_language": "en",
         }
 
@@ -348,23 +337,22 @@ class YearLanguageFilterTests(unittest.TestCase):
             decode_result(output.messages[0][0])[4],
             {
                 "url": "http://example.com/aliases",
-                "date_modified": "2024-05-06",
+                "date_modified": "2019-05-06",
             },
         )
 
-    def test_falls_back_to_date_modified_for_the_year(self):
+    def test_accepts_date_modified_alias(self):
         instance, output, _ = build_filter()
         article = {
-            "url": "http://example.com/no-creation",
+            "url": "http://example.com/date-modified-alias",
             "date_modified": "2019-02-03",
             "in_language": "en",
         }
 
-        with self.assertLogs(level="WARNING"):
-            acked, nacked = process(
-                instance,
-                message_protocol.internal.serialize_article(1, article),
-            )
+        acked, nacked = process(
+            instance,
+            message_protocol.internal.serialize_article(1, article),
+        )
 
         self.assertTrue(acked)
         self.assertFalse(nacked)

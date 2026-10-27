@@ -16,8 +16,6 @@ if FILTER_AMOUNT < 1:
     raise ValueError("FILTER_AMOUNT must be greater than zero")
 
 FILTER_FIELDS = (
-    "creation_date",
-    "date_created",
     "date_modified",
     "image",
     "in_language",

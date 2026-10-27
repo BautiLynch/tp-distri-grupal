@@ -62,7 +62,6 @@ class GatewayTests(unittest.TestCase):
     def test_filter_article_fields_keeps_q1_fields(self):
         article = {
             "abstract": "not for q1",
-            "creation_date": "2019-01-01",
             "date_modified": "2024-01-01",
             "image": "image-ref",
             "in_language": "en",
@@ -78,7 +77,6 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(
             filtered,
             {
-                "creation_date": "2019-01-01",
                 "date_modified": "2024-01-01",
                 "image": "image-ref",
                 "in_language": "en",
@@ -104,7 +102,6 @@ class GatewayTests(unittest.TestCase):
         articles = [
             {
                 "url": f"http://example.com/{index}",
-                "creation_date": "2019-01-01",
                 "date_modified": "2024-01-01",
                 "in_language": "en",
             }

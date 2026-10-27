@@ -1,7 +1,7 @@
-"""Entidad filter de la query 1: idioma y anio de escritura.
+"""Entidad filter de la query 1: idioma y anio de modificacion.
 
 Entrada por RabbitMQ (protocolo interno binario):
-    ARTICLE: articulo como diccionario con url, fechas e idioma.
+    ARTICLE: articulo como diccionario con url, fecha de modificacion e idioma.
     END_OF_RECORDS: fin del stream de un cliente.
 
 Salida al Handler:
@@ -61,7 +61,6 @@ class YearLanguageFilter:
             raise ValueError("LANGUAGES must contain at least one language")
 
         self.max_year = int(env.get("MAX_YEAR", "2020"))
-        self._warned_missing_creation_date = False
 
         self.end_event = threading.Event()
         self.input_exchange = (
@@ -115,42 +114,21 @@ class YearLanguageFilter:
         if str(language).strip().lower() not in self.languages:
             return
 
-        creation_date = article.get("creation_date")
-        if creation_date is None:
-            creation_date = article.get("date_created")
-        if creation_date is None:
-            creation_date = article.get("date_modified")
-            if creation_date is None:
-                raise ValueError("ARTICLE is missing creation date")
-            if not self._warned_missing_creation_date:
-                logging.warning(
-                    "ARTICLE has no creation_date/date_created; "
-                    "falling back to date_modified"
-                )
-                self._warned_missing_creation_date = True
-
-        creation_year = _year(creation_date)
-        if creation_year is None:
-            logging.warning(
-                "Discarding article %s: invalid creation date %r",
-                url,
-                creation_date,
-            )
-            return
-        if creation_year > self.max_year:
-            return
-
         modification_date = article.get("modification_date")
         if modification_date is None:
             modification_date = article.get("date_modified")
         if modification_date is None:
             raise ValueError("ARTICLE is missing modification date")
-        if _year(modification_date) is None:
+
+        modification_year = _year(modification_date)
+        if modification_year is None:
             logging.warning(
                 "Discarding article %s: invalid modification date %r",
                 url,
                 modification_date,
             )
+            return
+        if modification_year > self.max_year:
             return
 
         self._send_result(
