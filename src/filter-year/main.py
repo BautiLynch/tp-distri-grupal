@@ -6,13 +6,14 @@ import threading
 from common import middleware, hashing
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 
-ID = int(os.environ["ID"])
+ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 AVERAGE_EXCHANGE = os.environ["AVERAGE_EXCHANGE"]
-FILTER_AVERAGE_EXCHANGE = os.environ["FILTER_AVERAGE_EXCHANGE"]
-SPLITTER_AMOUNT = int(os.environ["SPLITTER_AMOUNT"])
 AVERAGE_AMOUNT = int(os.environ.get("AVERAGE_AMOUNT"))
+FILTER_AVERAGE_EXCHANGE = os.environ["FILTER_AVERAGE_EXCHANGE"]
+FILTER_AVERAGE_AMOUNT = int(os.environ.get("FILTER_AVERAGE_AMOUNT"))
+SPLITTER_AMOUNT = int(os.environ["SPLITTER_AMOUNT"])
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
 YEAR = os.environ.get("YEAR")
 
@@ -21,13 +22,13 @@ class FilterYear:
 
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [f"{INPUT_EXCHANGE}_{ID}"]
+            MOM_HOST, INPUT_EXCHANGE, [ID]
         )
         self.output_exchange_average = middleware.MessageMiddlewareExchangeRabbitMQ( 
-            MOM_HOST, AVERAGE_EXCHANGE
+            MOM_HOST, AVERAGE_EXCHANGE, [f"{index}" for index in range(AVERAGE_AMOUNT)]
         )
         self.output_exchange_filter_average = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, FILTER_AVERAGE_EXCHANGE
+            MOM_HOST, FILTER_AVERAGE_EXCHANGE, [f"{index}" for index in range(FILTER_AVERAGE_AMOUNT)]
         )
 
         self.eof_by_client = {}

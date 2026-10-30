@@ -6,10 +6,13 @@ import threading
 from common import middleware
 from common.message_protocol.internal import deserialize_msg, MsgType, serialize_msg
 
-ID = int(os.environ["ID"])
+ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
-GATEWAY_PREFIX = os.environ["GATEWAY_PREFIX"]
-FILTER_YEAR_PLUS_PREFIX = os.environ["FILTER_YEAR_PLUS_PREFIX"]
+INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
+OUTPUT_EXCHANGE_1 = os.environ["OUTPUT_EXCHANGE_1"]
+OUTPUT_EXCHANGE_2 = os.environ["OUTPUT_EXCHANGE_2"]
+IMAGE_GETTER_PREFIX = os.environ["IMAGE_GETTER_PREFIX"]
+IMAGE_GETTER_AMOUNT = int(os.environ["IMAGE_GETTER_AMOUNT"])
 LANGUAGE = os.environ.get("LANGUAGE")
 SECTIONS = os.environ.get("SECTIONS").split(",")
 YEAR = os.environ.get("YEAR")
@@ -18,13 +21,13 @@ YEAR = os.environ.get("YEAR")
 class FilterYearPlus:
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, f"{GATEWAY_PREFIX}_filter", [f"{GATEWAY_PREFIX}_filter_{ID}"]
+            MOM_HOST, INPUT_EXCHANGE, [ID]
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ( 
-            MOM_HOST, f"{FILTER_YEAR_PLUS_PREFIX}"
+            MOM_HOST, OUTPUT_EXCHANGE_1, []
         )
         self.output_exchange_image = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, f"{FILTER_YEAR_PLUS_PREFIX}_image"
+            MOM_HOST, OUTPUT_EXCHANGE_2, [f"{index}" for index in range(IMAGE_GETTER_AMOUNT)]
         )
 
         self.sections = set(SECTIONS)
@@ -46,8 +49,8 @@ class FilterYearPlus:
             
             elif message_type == MsgType.END_OF_RECORDS:
                 logging.info("Received EOF")
-                self.output_exchange.send_to(serialize_msg(MsgType.END_OF_RECORDS, client_id, MsgType.Q1_RESULT), routing_key=client_id)
-                self.output_exchange_image.send(serialize_msg(MsgType.END_OF_RECORDS, client_id, MsgType.Q2_RESULT))
+                self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q1_RESULT), routing_key=client_id)
+                self.output_exchange_image.send(serialize_msg(MsgType.END_OF_RECORDS, client_id))
 
         except Exception:
             logging.exception("Error processing message")

@@ -6,7 +6,7 @@ import threading
 from common import middleware, hashing
 from common.message_protocol.internal import MsgType, serialize_msg, deserialize_msg
 
-ID = int(os.environ["ID"])
+ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 EXCHANGE_QUERY_3 = os.environ["EXCHANGE_QUERY_3"]
@@ -22,16 +22,16 @@ FILTER_LANGUAGE_AMOUNT = int(os.environ["FILTER_LANGUAGE_AMOUNT"])
 class Splitter:
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [f"{INPUT_EXCHANGE}_{ID}"]
+            MOM_HOST, INPUT_EXCHANGE, [ID]
         )
         self.output_exchange_3 = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, EXCHANGE_QUERY_3
+            MOM_HOST, EXCHANGE_QUERY_3, [f"{index}" for index in range(FILTER_LANGUAGE_AMOUNT)]
         )
         self.output_exchange_4 = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, EXCHANGE_QUERY_4
+            MOM_HOST, EXCHANGE_QUERY_4, [f"{index}" for index in range(AGGREGATION_AMOUNT)]
         )
         self.output_exchange_5 = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, EXCHANGE_QUERY_5
+            MOM_HOST, EXCHANGE_QUERY_5, [f"{index}" for index in range(FILTER_YEAR_AMOUNT)]
         )
 
         self.en_stopwords = self._load_stopwords("english")

@@ -7,20 +7,23 @@ import urllib.request
 from common import middleware
 from common.message_protocol.internal import deserialize_msg, MsgType, serialize_msg
 
-ID = int(os.environ["ID"])
+ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
-IMAGE_GETTER_PREFIX = os.environ["IMAGE_GETTER_PREFIX"]
-FILTER_YEAR_PLUS_PREFIX = os.environ["FILTER_YEAR_PLUS_PREFIX"]
+OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
+INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
+FILTER_YEAR_PLUS_AMOUNT = int(os.environ["FILTER_YEAR_PLUS_AMOUNT"])
 
 
 class ImageGetter:
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, f"{FILTER_YEAR_PLUS_PREFIX}_image", [f"{FILTER_YEAR_PLUS_PREFIX}_image_{ID}"]
+            MOM_HOST, INPUT_EXCHANGE, [ID]
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, IMAGE_GETTER_PREFIX
+            MOM_HOST, OUTPUT_EXCHANGE, []
         )
+
+        self.eof_by_client = {}
 
         self.end_event = threading.Event()
         signal.signal(signal.SIGTERM, self.sigterm_handler)
@@ -39,7 +42,10 @@ class ImageGetter:
 
         elif message_type == MsgType.END_OF_RECORDS:
             logging.info("Received EOF")
-            self.output_exchange.send_to(serialize_msg(MsgType.END_OF_RECORDS, client_id, MsgType.Q2_RESULT), routing_key=client_id)
+
+            self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
+            if self.eof_by_client[client_id] == FILTER_YEAR_PLUS_AMOUNT:
+                self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q2_RESULT), routing_key=client_id)
 
         else:
             nack()

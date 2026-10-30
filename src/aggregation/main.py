@@ -7,7 +7,7 @@ import threading
 from common import middleware, storage
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 
-ID = int(os.environ["ID"])
+ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
@@ -19,7 +19,7 @@ class AggregationFilter:
 
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [f"{INPUT_EXCHANGE}_{ID}"]
+            MOM_HOST, INPUT_EXCHANGE, [ID]
         )
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, OUTPUT_EXCHANGE
@@ -44,7 +44,7 @@ class AggregationFilter:
                 key=lambda item: item[1],
             )
             self.words_by_client[client_id] = {}
-            self.output_queue.send_to(serialize_msg(MsgType.Q4_RESULT, client_id, top_parcial), routing_key=client_id) 
+            self.output_queue.send(serialize_msg(MsgType.Q4_RESULT, client_id, top_parcial)) 
 
 
     def process_message(self, message, ack, nack):

@@ -6,7 +6,7 @@ import threading
 from common import middleware
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 
-ID = int(os.environ["ID"])
+ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
@@ -19,10 +19,10 @@ class FilterLanguage:
 
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [f"{INPUT_EXCHANGE}_{ID}"]
+            MOM_HOST, INPUT_EXCHANGE, [ID]
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ( 
-            MOM_HOST, OUTPUT_EXCHANGE
+            MOM_HOST, OUTPUT_EXCHANGE, []
         )
 
         self.eof_by_client = {}
@@ -58,7 +58,7 @@ class FilterLanguage:
 
             self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
             if self.eof_by_client[client_id] == SPLITTER_AMOUNT:
-                self.output_exchange.send_to(serialize_msg(MsgType.END_OF_RECORDS, client_id, MsgType.Q3_RESULT), routing_key=client_id) 
+                self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q3_RESULT), routing_key=client_id) 
 
         else:
             nack()

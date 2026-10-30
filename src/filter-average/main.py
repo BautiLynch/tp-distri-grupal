@@ -6,7 +6,7 @@ import threading
 from common import middleware
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 
-ID = int(os.environ["ID"])
+ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
@@ -21,10 +21,10 @@ class FilterAverage:
 
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [f"{INPUT_EXCHANGE}_{ID}"]
+            MOM_HOST, INPUT_EXCHANGE, [ID]
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ( 
-            MOM_HOST, OUTPUT_EXCHANGE
+            MOM_HOST, OUTPUT_EXCHANGE, []
         )
 
         self.eof_by_client = {}
@@ -49,7 +49,7 @@ class FilterAverage:
             self.pending_messages_by_client[client_id] = []
 
         elif self.eof_by_client[client_id] == AVERAGE_AMOUNT + FILTER_YEAR_AMOUNT:
-            self.output_exchange.send_to(serialize_msg(MsgType.END_OF_RECORDS, client_id, MsgType.Q5_RESULT), routing_key=client_id) 
+            self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q5_RESULT), routing_key=client_id) 
 
     def _process_abstract(self, client_id, url, amount_words):
         logging.info("Received abstract")

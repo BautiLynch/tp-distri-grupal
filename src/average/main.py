@@ -6,10 +6,11 @@ import threading
 from common import middleware, storage, hashing
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 
-ID = int(os.environ["ID"])
+ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
 AVERAGE_PREFIX = os.environ["AVERAGE_PREFIX"]
-FILTER_YEAR_PREFIX = os.environ["FILTER_YEAR_PREFIX"]
+INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
+OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 FILTER_AVERAGE_AMOUNT = int(os.environ["FILTER_AVERAGE_AMOUNT"])
 YEAR = int(os.environ.get("YEAR"))
 
@@ -20,10 +21,10 @@ class Average:
 
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, f"{FILTER_YEAR_PREFIX}_newer", [f"{AVERAGE_PREFIX}_newer_{ID}"]
+            MOM_HOST, INPUT_EXCHANGE, [ID]
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, f"{FILTER_YEAR_PREFIX}_older"
+            MOM_HOST, OUTPUT_EXCHANGE, [f"{index}" for index in range(FILTER_AVERAGE_AMOUNT)]
         )
 
         self.urls_by_client = {}

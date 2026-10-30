@@ -1,14 +1,15 @@
-class MsgType:
-    ARTICLE = 1
-    CLIENT_ID = 2
-    ACK = 3
-    END_OF_RECORDS = 4
-    HANDLER_ADDRESS = 5
-    RESULT = 6
+from enum import IntEnum, auto
 
+
+class MsgType(IntEnum):
+    ARTICLE = 1
+    CLIENT_ID = auto()
+    ACK = auto()
+    END_OF_RECORDS = auto()
+    HANDLER_ADDRESS = auto()
+    RESULT = auto()
 
 UINT32_SIZE = 4
-
 
 def recv_all(connection, size):
     data = bytearray()
@@ -89,7 +90,6 @@ def _validate_address(host, port):
 def _serialize_handler_address(host, port):
     _validate_address(host, port)
     return _serialize_text(host) + _serialize_uint32(port)
-
 
 def _recv_result(connection):
     query_id = _recv_uint32(connection)

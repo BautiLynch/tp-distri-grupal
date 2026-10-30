@@ -8,7 +8,7 @@ from common.key_item import KeyItem
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 
 MOM_HOST = os.environ["MOM_HOST"]
-INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
+INPUT_QUEUE = os.environ["INPUT_QUEUE"]
 OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 AGGREGATION_AMOUNT = int(os.environ["AGGREGATION_AMOUNT"])
 TOP_SIZE = int(os.environ["TOP_SIZE"])
@@ -17,10 +17,10 @@ class JoinFilter:
 
     def __init__(self):
         self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE
+            MOM_HOST, INPUT_QUEUE, []
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, OUTPUT_EXCHANGE
+            MOM_HOST, OUTPUT_EXCHANGE, []
         )
 
         self.agg_by_client = {} # Contador
@@ -56,7 +56,7 @@ class JoinFilter:
         self.top_by_client[client_id] = {}
         self.agg_by_client[client_id] = {}
 
-        self.output_exchange.send_to(serialize_msg(MsgType.END_OF_RECORDS, client_id, MsgType.Q4_RESULT), routing_key=client_id)
+        self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q4_RESULT), routing_key=client_id)
         
     def process_message(self, message, ack, nack):
         logging.info("Received top")

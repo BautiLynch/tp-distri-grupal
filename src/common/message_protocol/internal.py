@@ -93,8 +93,7 @@ def _serialize_query2_result(name, url, image_bytes):
     payload += len(image_bytes).to_bytes(UINT32_SIZE, "big")
     return payload + image_bytes
 
-def _serialize_query4_result(client_id, top_list):
-    payload = client_id.to_bytes(UINT32_SIZE, "big")
+def _serialize_query4_result(top_list):
     payload += len(top_list).to_bytes(UINT32_SIZE, "big")
     for word, amount in top_list:
         payload += _serialize_texts((word,))
@@ -103,6 +102,10 @@ def _serialize_query4_result(client_id, top_list):
 
 def _serialize_query3_result(word, client_id):
     return _serialize_texts((word, str(client_id)))
+
+def _serialize_end(message_type):
+    payload += message_type.to_bytes(UINT32_SIZE, "big")
+    return payload
 
 def _serialize_empty():
     return b""
@@ -176,6 +179,11 @@ def _deserialize_query2_result(payload):
     _check_end(payload, offset)
     return fields + (image_bytes,)
 
+def _deserialize_query3_result(payload):
+    fields, offset = _deserialize_texts(payload, 2)
+    _check_end(payload, offset)
+    return fields
+
 def _deserialize_query4_result(payload):
     client_id, offset = _deserialize_uint32(payload, 0)
     top_list_count, offset = _deserialize_uint32(payload, offset)
@@ -186,6 +194,11 @@ def _deserialize_query4_result(payload):
         top_list.append((word, amount))
     _check_end(payload, offset)
     return (client_id, top_list)
+
+def _deserialize_end(payload):
+    message_type, offset = _deserialize_uint32(payload, 0)
+    _check_end(payload, offset)
+    return (message_type)
 
 def _deserialize_empty(payload):
     _check_end(payload, 0)
@@ -198,10 +211,10 @@ RECV_MSG_HANDLERS = {
     MsgType.WORD: _deserialize_word,
     MsgType.Q1_RESULT: _deserialize_query1_result,
     MsgType.Q2_RESULT: _deserialize_query2_result,
-    MsgType.Q3_RESULT: _deserialize_query1_result,
+    MsgType.Q3_RESULT: _deserialize_query3_result,
     MsgType.Q4_RESULT: _deserialize_query4_result,
     MsgType.END_OF_RECORDS: _deserialize_empty,
-    MsgType.QUERY_END: _deserialize_empty,
+    MsgType.QUERY_END: _deserialize_end,
 }
 
 SEND_MSG_HANDLERS = {
@@ -210,10 +223,10 @@ SEND_MSG_HANDLERS = {
     MsgType.WORD: _serialize_word,
     MsgType.Q1_RESULT: _serialize_query1_result,
     MsgType.Q2_RESULT: _serialize_query2_result,
-    MsgType.Q3_RESULT: _serialize_query1_result,
+    MsgType.Q3_RESULT: _serialize_query3_result,
     MsgType.Q4_RESULT: _serialize_query4_result,
     MsgType.END_OF_RECORDS: _serialize_empty,
-    MsgType.QUERY_END: _serialize_empty,
+    MsgType.QUERY_END: _serialize_end,
 }
 
 
