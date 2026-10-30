@@ -3,8 +3,8 @@ class MsgType:
     CLIENT_ID = 2
     ACK = 3
     END_OF_RECORDS = 4
-    HANDLER_ADDRESS = 6
-    RESULT = 7
+    HANDLER_ADDRESS = 5
+    RESULT = 6
 
 
 UINT32_SIZE = 4
