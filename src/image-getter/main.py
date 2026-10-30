@@ -33,8 +33,6 @@ class ImageGetter:
             self.output_exchange.send_to(serialize_msg(MsgType.Q2_RESULT, client_id, name, url, response.read()), routing_key=client_id)
 
     def process_message(self, message, ack, nack):
-        logging.info("Process message")
-
         message_type, client_id, fields = deserialize_msg(message)
         if message_type == MsgType.GET_IMAGE:
             name, url, image_url = fields
@@ -53,7 +51,7 @@ class ImageGetter:
         ack()
 
     def close(self):
-        for mom in [self.input_exchange, self.output_queue]:
+        for mom in [self.input_exchange, self.output_exchange]:
             try:
                 mom.close()
             except Exception as e:

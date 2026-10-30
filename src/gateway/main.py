@@ -5,7 +5,6 @@ import signal
 import socket
 
 from common import middleware, message_protocol
-from common.hashing.hashing import routing_key, routing_keys
 
 from helpers import preprocess_article, parse_article
 
@@ -21,6 +20,8 @@ HANDLER_PORT = int(os.environ["HANDLER_PORT"])
 
 if FILTER_AMOUNT < 1:
     raise ValueError("FILTER_AMOUNT must be greater than zero")
+if SPLITTER_AMOUNT < 1:
+    raise ValueError("SPLITTER_AMOUNT must be greater than zero")
 
 def handle_client_request(client_socket, client_id, client_dict, sigterm_received):
     filter_exchange = None
@@ -57,8 +58,8 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
                     message_protocol.internal.MsgType.SPLITTER_ARTICLE,
                     client_id, *splitter_article,
                 )
-                filter_exchange.send_to(filtered, routing_key(FILTER_PREFIX, article_index, FILTER_AMOUNT))
-                splitter_exchange.send_to(split, routing_key(SPLITTER_PREFIX, article_index, SPLITTER_AMOUNT))
+                filter_exchange.send_to(filtered, str(article_index % FILTER_AMOUNT))
+                splitter_exchange.send_to(split, str(article_index % SPLITTER_AMOUNT))
                 article_index += 1
             else:
                 end_of_records = message_protocol.internal.serialize_msg(

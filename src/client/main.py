@@ -5,6 +5,7 @@ import queue
 import signal
 import socket
 import threading
+import time
 
 from common.message_protocol import external
 
@@ -150,6 +151,9 @@ class Client:
 
 def main():
     logging.basicConfig(level=logging.INFO)
+    started_at = time.perf_counter()
+    logging.info("Client started")
+    completed = False
     previous_handlers = {}
     try:
         client = Client(
@@ -160,12 +164,16 @@ def main():
         for sig in (signal.SIGTERM, signal.SIGINT):
             previous_handlers[sig] = signal.signal(sig, lambda signum, frame: client.stop())
         client.run()
+        completed = True
     except Exception:
         logging.exception("Client failed")
         return 1
     finally:
         for sig, previous in previous_handlers.items():
             signal.signal(sig, previous)
+        elapsed = time.perf_counter() - started_at
+        logging.info("Client finished; status=%s", "success" if completed else "failed")
+        logging.info("Client total duration: %.3f seconds", elapsed)
     return 0
 
 

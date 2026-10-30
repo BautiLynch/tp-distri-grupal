@@ -16,7 +16,7 @@ IMAGE_GETTER_PREFIX = os.environ["IMAGE_GETTER_PREFIX"]
 IMAGE_GETTER_AMOUNT = int(os.environ["IMAGE_GETTER_AMOUNT"])
 LANGUAGE = os.environ.get("LANGUAGE")
 SECTIONS = os.environ.get("SECTIONS").split(",")
-YEAR = os.environ.get("YEAR")
+YEAR = int(os.environ["YEAR"])
 
 
 class FilterYearPlus:
@@ -40,13 +40,13 @@ class FilterYearPlus:
         try:
             message_type, client_id, fields = deserialize_msg(message)
             if message_type == MsgType.FILTER_ARTICLE:
-                url, language, date_modified, name, sections, image_url = fields
+                name, url, language, date_modified, image_url, sections = fields
 
-                if datetime.strptime(date_modified, "%d/%m/%Y %H:%M:%S").year <= YEAR:
+                if datetime.fromisoformat(date_modified.replace("Z", "+00:00")).year <= YEAR:
                     if language.lower() == LANGUAGE.lower():
                         self.output_exchange.send_to(serialize_msg(MsgType.Q1_RESULT, client_id, url, date_modified), routing_key=client_id)
 
-                    elif self.sections.intersection(section.lower() for section in sections):
+                    if self.sections.intersection(section.lower() for section in sections):
                         self.output_exchange_image.send_to(serialize_msg(MsgType.GET_IMAGE, client_id, url, name, image_url), routing_key=client_id)
             
             elif message_type == MsgType.END_OF_RECORDS:
@@ -68,7 +68,7 @@ class FilterYearPlus:
         self.input_exchange.stop_consuming_threadsafe()
 
     def close(self):
-        for mom in [self.input_exchange, self.output_exchange]:
+        for mom in [self.input_exchange, self.output_exchange, self.output_exchange_image]:
             try:
                 mom.close()
             except Exception as e:

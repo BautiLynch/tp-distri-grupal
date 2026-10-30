@@ -70,7 +70,7 @@ class ClientHandler:
                 deserialize_msg(message)
             )
             if message_type == InternalMsgType.QUERY_END:
-                query_id = serialize_payload(message_type, *fields)
+                query_id, = fields
                 query_name = f"q{query_id}"
                 self.query_end_counts[query_name] += 1
                 if self.query_end_counts[query_name] == QUERY_REPLICAS[query_name]:

@@ -88,6 +88,8 @@ class Splitter:
 
             # TODO: revisar como evitar repetir tanto codigo
 
+        self.word_count.clear()
+
     def _is_stopword(self, word, language):
         if language == "en":
             return word in self.en_stopwords
@@ -97,7 +99,6 @@ class Splitter:
             return False
 
     def process_message(self, message, ack, nack):
-        logging.info("Process message")
         try:
             message_type, client_id, fields = deserialize_msg(message)
             if message_type == MsgType.SPLITTER_ARTICLE:
@@ -119,7 +120,7 @@ class Splitter:
         ack()
 
     def close(self):
-        for mom in [self.input_queue, self.output_queue]:
+        for mom in [self.input_exchange, self.output_exchange_3, self.output_exchange_4, self.output_exchange_5]:
             try:
                 mom.close()
             except Exception as e:
@@ -135,7 +136,7 @@ class Splitter:
         if self.end_event.is_set():
             return
         self.end_event.set()
-        self.input_queue.stop_consuming_threadsafe()
+        self.input_exchange.stop_consuming_threadsafe()
 
 def main():
     logging.basicConfig(level=logging.INFO)
