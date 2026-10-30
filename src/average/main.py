@@ -1,4 +1,3 @@
-import heapq
 import os
 import logging
 import signal
@@ -8,7 +7,7 @@ from common import middleware, message_protocol, storage
 
 ID = int(os.environ["ID"])
 MOM_HOST = os.environ["MOM_HOST"]
-OUTPUT_QUEUE = os.environ["OUTPUT_QUEUE"]
+OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 AVERAGE_PREFIX = os.environ["AVERAGE_PREFIX"]
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
 
@@ -19,10 +18,11 @@ class Average:
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, AVERAGE_PREFIX, [f"{AVERAGE_PREFIX}_{ID}"]
         )
-        self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ( # TODO: Creo que deberia ser un exchange
-            MOM_HOST, OUTPUT_QUEUE
+        self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, OUTPUT_EXCHANGE
         )
 
+        self.urls_by_client = {}
         self.storage = storage.Storage(STORAGE_PATH)
         self.end_event = threading.Event()
         signal.signal(signal.SIGTERM, self.sigterm_handler)
@@ -30,19 +30,23 @@ class Average:
     def _process_eof(self, client_id):
         logging.info("Received EOF")
 
-        urls = {}
-        for key in self.storage.load_key(client_id):
-            urls[key.key] = urls.get(key.key, 0) + key.amount
+        # urls = {}
+        # for key in self.storage.load_key(client_id):
+        #     urls[key.key] = urls.get(key.key, 0) + key.amount
 
-        message = [client_id, urls]
-        self.output_queue.send(message_protocol.internal.serialize(message))
+        message = [client_id, self.urls_by_client.get(client_id, {})]
+        self.urls_by_client[client_id] = {}
+        self.output_exchange.send(message_protocol.internal.serialize(message))
         
 
     def process_message(self, message, ack, nack):
         logging.info("Process message")
         fields = message_protocol.internal.deserialize(message) # TODO: Validar protocolo
         if len(fields) == 3:
-            self.storage.store_key(*fields)
+            client_id, key, amount = fields
+            self.urls_by_client[client_id] = self.urls_by_client.get(client_id, {})
+            self.urls_by_client[client_id][key] = self.urls_by_client[client_id].get(key, 0) + amount
+            #self.storage.store_key(*fields)
         elif len(fields) == 1:
             self._process_eof(*fields)
         else:
@@ -57,7 +61,7 @@ class Average:
         self.input_exchange.stop_consuming_threadsafe()
 
     def close(self):
-        for mom in [self.input_exchange, self.output_queue]:
+        for mom in [self.input_exchange, self.output_exchange]:
             try:
                 mom.close()
             except Exception as e:

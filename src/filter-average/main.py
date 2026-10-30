@@ -3,13 +3,14 @@ import logging
 import signal
 import threading
 
-from common import middleware, message_protocol, storage
+from common import middleware, message_protocol
 
 ID = int(os.environ["ID"])
 MOM_HOST = os.environ["MOM_HOST"]
-OUTPUT_QUEUE = os.environ["OUTPUT_QUEUE"]
+OUTPUT_EXCHAGE = os.environ["OUTPUT_EXCHAGE"]
 FILTER_AVERAGE_PREFIX = os.environ["FILTER_AVERAGE_PREFIX"]
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
+YEAR = os.environ.get("YEAR")
 
 
 class FilterAverage:
@@ -18,32 +19,43 @@ class FilterAverage:
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, FILTER_AVERAGE_PREFIX, [f"{FILTER_AVERAGE_PREFIX}_{ID}"]
         )
-        self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ( # TODO: Creo que deberia ser un exchange
-            MOM_HOST, OUTPUT_QUEUE
+        self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ( 
+            MOM_HOST, OUTPUT_EXCHAGE
         )
 
-        self.storage = storage.Storage(STORAGE_PATH)
+        self.average_by_client = {}
+        self.words_by_client = {}
         self.end_event = threading.Event()
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def _process_eof(self, client_id):
         logging.info("Received EOF")
 
-        urls = {}
-        for key in self.storage.load_key(client_id):
-            urls[key.key] = urls.get(key.key, 0) + key.amount
+        amount_urls, amount_words = self.words_by_client.get(client_id, (0, 0))
+        self.average_by_client[client_id] = amount_words / amount_urls if amount_urls > 0 else 0
 
-        message = [client_id, urls]
-        self.output_queue.send(message_protocol.internal.serialize(message))
-        
+    def _process_abstract(self, client_id, url, amount_words):
+        logging.info("Received abstract")
+
+        # TODO: deberia validar que exista el average o guardar hasta que llegue el EOF
+        if amount_words > self.average_by_client[client_id]:
+            message = [client_id, url, amount_words]
+            self.output_exchange.send(message_protocol.internal.serialize(message)) # TODO: Deberia ser "send_to" por client_id
 
     def process_message(self, message, ack, nack):
         logging.info("Process message")
         fields = message_protocol.internal.deserialize(message) # TODO: Validar protocolo
-        if len(fields) == 3:
-            self.storage.store_key(*fields)
-        elif len(fields) == 1:
+        if len(fields) == 1:
             self._process_eof(*fields)
+
+        elif len(fields) == 4:
+            client_id, key, year, amount = fields
+            if year >= YEAR: # TODO: validar que este bien el >=
+                self.words_by_client[client_id] = self.words_by_client.get(client_id, (0, 0))
+                self.words_by_client[client_id] = (self.words_by_client[client_id][0] + 1, self.words_by_client[client_id][1] + amount)
+            else:
+                self._process_abstract(client_id, key, amount)
+
         else:
             nack()
             return
@@ -56,7 +68,7 @@ class FilterAverage:
         self.input_exchange.stop_consuming_threadsafe()
 
     def close(self):
-        for mom in [self.input_exchange, self.output_queue]:
+        for mom in [self.input_exchange, self.output_exchange]:
             try:
                 mom.close()
             except Exception as e:
