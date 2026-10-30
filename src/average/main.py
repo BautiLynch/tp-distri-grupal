@@ -3,12 +3,15 @@ import logging
 import signal
 import threading
 
-from common import middleware, message_protocol, storage
+from common import middleware, message_protocol, storage, hashing
 
 ID = int(os.environ["ID"])
 MOM_HOST = os.environ["MOM_HOST"]
-OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 AVERAGE_PREFIX = os.environ["AVERAGE_PREFIX"]
+FILTER_AVERAGE_PREFIX = os.environ["FILTER_AVERAGE_PREFIX"]
+FILTER_AVERAGE_AMOUNT = int(os.environ["FILTER_AVERAGE_AMOUNT"])
+YEAR = int(os.environ.get("YEAR"))
+
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
 
 
@@ -19,7 +22,7 @@ class Average:
             MOM_HOST, AVERAGE_PREFIX, [f"{AVERAGE_PREFIX}_{ID}"]
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, OUTPUT_EXCHANGE
+            MOM_HOST, FILTER_AVERAGE_PREFIX
         )
 
         self.urls_by_client = {}
@@ -34,9 +37,11 @@ class Average:
         # for key in self.storage.load_key(client_id):
         #     urls[key.key] = urls.get(key.key, 0) + key.amount
 
-        message = [client_id, self.urls_by_client.get(client_id, {})]
+        for word, amount in self.urls_by_client.get(client_id, {}).items():
+            key = hashing.get_hash_key(f"{client_id}_{word}", FILTER_AVERAGE_AMOUNT)
+            self.output_exchange.send_to(message_protocol.internal.serialize([client_id, word, amount, YEAR]), routing_key=key)
+
         self.urls_by_client[client_id] = {}
-        self.output_exchange.send(message_protocol.internal.serialize(message))
         
 
     def process_message(self, message, ack, nack):

@@ -9,7 +9,6 @@ MOM_HOST = os.environ["MOM_HOST"]
 INPUT_QUEUE = os.environ["INPUT_QUEUE"]
 OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 AGGREGATION_AMOUNT = int(os.environ["AGGREGATION_AMOUNT"])
-AGGREGATION_PREFIX = os.environ["AGGREGATION_PREFIX"]
 TOP_SIZE = int(os.environ["TOP_SIZE"])
 
 
@@ -49,7 +48,7 @@ class JoinFilter:
             for item in final_top
         ]
 
-        self.output_exchange.send(message_protocol.internal.serialize([client_id, result]))
+        self.output_exchange.send_to(message_protocol.internal.serialize([client_id, result]), routing_key=client_id)
         self.top_by_client[client_id] = {}
         self.agg_by_client[client_id] = {}
         

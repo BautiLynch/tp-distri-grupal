@@ -38,9 +38,10 @@ class FilterAverage:
         logging.info("Received abstract")
 
         # TODO: deberia validar que exista el average o guardar hasta que llegue el EOF
+        
         if amount_words > self.average_by_client[client_id]:
             message = [client_id, url, amount_words]
-            self.output_exchange.send(message_protocol.internal.serialize(message)) # TODO: Deberia ser "send_to" por client_id
+            self.output_exchange.send_to(message_protocol.internal.serialize(message), routing_key=client_id)
 
     def process_message(self, message, ack, nack):
         logging.info("Process message")
