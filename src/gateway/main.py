@@ -19,7 +19,7 @@ class Gateway:
     def start(self):
         with multiprocessing.Manager() as manager:
             self.sigterm_received = manager.Value("h", 0)
-            cpu_count = getattr(os, "process_cpu_count", os.cpu_count)
+            cpu_count = getattr(os, "process_cpu_count", os.cpu_count) # TODO: Hace falta crear tantos procesos?
             with multiprocessing.Pool(processes=cpu_count()) as self.processes_pool:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as self.server_socket:
                     previous_handler = signal.signal(signal.SIGTERM, self.sigterm_handler)
@@ -29,7 +29,7 @@ class Gateway:
                         self.server_socket.settimeout(1)
                         logging.info("Listening to connections")
                         return self.accept_clients()
-                    finally:
+                    finally: # TODO: Me chifla un agente que acá se puede quedar bloqueado si "recv_msg" de un worker se queda bloqueado"
                         try:
                             self.shutdown()
                             self.processes_pool.close()
@@ -60,6 +60,7 @@ class Gateway:
                 return 2
         return 0
 
+    # TODO: Me chifla un agente que deberiamos usar directo "multiprocessing.Process"
     def create_worker(self, client_socket, client_id):
         worker = Worker(client_socket, client_id, self.sigterm_received)
 
@@ -82,9 +83,9 @@ class Gateway:
             raise
 
     def sigterm_handler(self, signum, frame):
-        self.shutdown()
+        self.shutdown() # TODO: Se supone que el shutdown se hace en el "finally" del "start"
 
-    def shutdown(self):
+    def shutdown(self): # TODO: Creo q no es idempotente 
         if self.sigterm_received is not None:
             self.sigterm_received.value = 1
         connections = list(self.client_dict.values())
@@ -101,7 +102,9 @@ class Gateway:
 
 def main():
     logging.basicConfig(level=logging.INFO)
-    return Gateway().start()
+    gateway = Gateway()
+    gateway.start()
+    return 0
 
 
 if __name__ == "__main__":
