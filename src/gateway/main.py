@@ -66,7 +66,7 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
             ):
                 raise ValueError("Expected an article or end of records")
             if message_type == message_protocol.external.MsgType.ARTICLE:
-                filter_exchange.send_rk(
+                filter_exchange.send_to(
                     message_protocol.internal.serialize_article(
                         client_id,
                         filter_article_fields(article, FILTER_FIELDS),
@@ -85,7 +85,7 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
                     client_id
                 )
                 for routing_key in filter_routing_keys():
-                    filter_exchange.send_rk(end_of_records, routing_key)
+                    filter_exchange.send_to(end_of_records, routing_key)
                 splitter_queue.send(end_of_records)
             message_protocol.external.send_msg(
                 client_socket, message_protocol.external.MsgType.ACK

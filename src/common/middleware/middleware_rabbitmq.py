@@ -126,7 +126,7 @@ class MessageMiddlewareExchangeRabbitMQ(_MessageMiddlewareRabbitMQBase, MessageM
                 routing_key=routing_key,
             )
 
-    def send_rk(self, message, routing_key):
+    def send_to(self, message, routing_key):
         try:
             with self._publish_lock:
                 self.chan.basic_publish(
