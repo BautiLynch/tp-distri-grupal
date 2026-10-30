@@ -24,6 +24,7 @@ class AggregationFilter:
             MOM_HOST, OUTPUT_QUEUE
         )
 
+        self.words_by_client = {}
         self.storage = storage.Storage(STORAGE_PATH)
         self.end_event = threading.Event()
         signal.signal(signal.SIGTERM, self.sigterm_handler)
@@ -31,15 +32,16 @@ class AggregationFilter:
     def _process_eof(self, client_id):
         logging.info("Received EOF")
 
-        top_words = {}
-        for key in self.storage.load_key(client_id):
-            top_words[key.key] = top_words.get(key.key, 0) + key.amount
+        # for key in self.storage.load_key(client_id):
+        #    top_words[key.key] = top_words.get(key.key, 0) + key.amount
 
         top_parcial = heapq.nlargest(
             TOP_SIZE,
-            top_words.items(),
+            self.words_by_client.get(client_id, {}).items(),
             key=lambda item: item[1],
         )
+
+        self.words_by_client[client_id] = {}
 
         message = [client_id, top_parcial]
         self.output_queue.send(message_protocol.internal.serialize(message))
@@ -50,7 +52,9 @@ class AggregationFilter:
         fields = message_protocol.internal.deserialize(message) # TODO: Validar protocolo
         if len(fields) == 3:
             client_id, key, _ = fields
-            self.storage.store_key(client_id, key, 1)
+            self.words_by_client[client_id] = self.words_by_client.get(client_id, {})
+            self.words_by_client[client_id][key] = self.words_by_client[client_id].get(key, 0) + 1
+            #self.storage.store_key(client_id, key, 1)
         elif len(fields) == 1:
             self._process_eof(*fields)
         else:
