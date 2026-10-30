@@ -4,26 +4,27 @@ import logging
 import signal
 import threading
 
-from common import middleware, message_protocol, storage
+from common import middleware, storage
+from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 
 ID = int(os.environ["ID"])
 MOM_HOST = os.environ["MOM_HOST"]
-OUTPUT_QUEUE = os.environ["OUTPUT_QUEUE"]
-AGGREGATION_PREFIX = os.environ["AGGREGATION_PREFIX"]
+INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
+OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
+SPLITTER_AMOUNT = int(os.environ["SPLITTER_AMOUNT"])
 TOP_SIZE = int(os.environ["TOP_SIZE"])
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
-
 
 class AggregationFilter:
 
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, AGGREGATION_PREFIX, [f"{AGGREGATION_PREFIX}_{ID}"]
+            MOM_HOST, INPUT_EXCHANGE, [f"{INPUT_EXCHANGE}_{ID}"]
         )
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
-            MOM_HOST, OUTPUT_QUEUE
+            MOM_HOST, OUTPUT_EXCHANGE
         )
-
+        self.eof_by_client = {}
         self.words_by_client = {}
         self.storage = storage.Storage(STORAGE_PATH)
         self.end_event = threading.Event()
@@ -35,28 +36,29 @@ class AggregationFilter:
         # for key in self.storage.load_key(client_id):
         #    top_words[key.key] = top_words.get(key.key, 0) + key.amount
 
-        top_parcial = heapq.nlargest(
-            TOP_SIZE,
-            self.words_by_client.get(client_id, {}).items(),
-            key=lambda item: item[1],
-        )
+        self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
+        if self.eof_by_client[client_id] == SPLITTER_AMOUNT:
+            top_parcial = heapq.nlargest(
+                TOP_SIZE,
+                self.words_by_client.get(client_id, {}).items(),
+                key=lambda item: item[1],
+            )
+            self.words_by_client[client_id] = {}
+            self.output_queue.send_to(serialize_msg(MsgType.Q4_RESULT, client_id, top_parcial), routing_key=client_id) 
 
-        self.words_by_client[client_id] = {}
-
-        message = [client_id, top_parcial]
-        self.output_queue.send_to(message_protocol.internal.serialize(message), routing_key=client_id)
-        
 
     def process_message(self, message, ack, nack):
         logging.info("Process message")
-        fields = message_protocol.internal.deserialize(message) # TODO: Validar protocolo
-        if len(fields) == 3:
-            client_id, key, _ = fields
+        
+        message_type, client_id, fields = deserialize_msg(message)
+        if message_type == MsgType.WORD_AMOUNT:
+            client_id, word = fields
             self.words_by_client[client_id] = self.words_by_client.get(client_id, {})
-            self.words_by_client[client_id][key] = self.words_by_client[client_id].get(key, 0) + 1
+            self.words_by_client[client_id][word] = self.words_by_client[client_id].get(word, 0) + 1
             #self.storage.store_key(client_id, key, 1)
-        elif len(fields) == 1:
-            self._process_eof(*fields)
+            
+        elif message_type == MsgType.END_OF_RECORDS:
+            self._process_eof(client_id)
         else:
             nack()
             return

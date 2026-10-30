@@ -3,12 +3,15 @@ import logging
 import signal
 import threading
 
-from common import middleware, message_protocol, hashing
+from common import middleware, hashing
+from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 
 ID = int(os.environ["ID"])
 MOM_HOST = os.environ["MOM_HOST"]
-OUTPUT_EXCHAGE = os.environ["OUTPUT_EXCHAGE"]
-FILTER_YEAR_PREFIX = os.environ["FILTER_YEAR_PREFIX"]
+INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
+AVERAGE_EXCHANGE = os.environ["AVERAGE_EXCHANGE"]
+FILTER_AVERAGE_EXCHANGE = os.environ["FILTER_AVERAGE_EXCHANGE"]
+SPLITTER_AMOUNT = int(os.environ["SPLITTER_AMOUNT"])
 AVERAGE_AMOUNT = int(os.environ.get("AVERAGE_AMOUNT"))
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
 YEAR = os.environ.get("YEAR")
@@ -18,14 +21,16 @@ class FilterYear:
 
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, FILTER_YEAR_PREFIX, [f"{FILTER_YEAR_PREFIX}_{ID}"]
+            MOM_HOST, INPUT_EXCHANGE, [f"{INPUT_EXCHANGE}_{ID}"]
         )
-        self.output_exchange_older = middleware.MessageMiddlewareExchangeRabbitMQ( 
-            MOM_HOST, f"{OUTPUT_EXCHAGE}_older"
+        self.output_exchange_average = middleware.MessageMiddlewareExchangeRabbitMQ( 
+            MOM_HOST, AVERAGE_EXCHANGE
         )
-        self.output_exchange_newer = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, f"{OUTPUT_EXCHAGE}_newer"
+        self.output_exchange_filter_average = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, FILTER_AVERAGE_EXCHANGE
         )
+
+        self.eof_by_client = {}
 
         self.end_event = threading.Event()
         signal.signal(signal.SIGTERM, self.sigterm_handler)
@@ -39,18 +44,26 @@ class FilterYear:
 
     def process_message(self, message, ack, nack):
         logging.info("Process message")
-        fields = message_protocol.internal.deserialize(message) # TODO: Validar protocolo
-        if len(fields) == 1:
-            self.output_exchange_newer.send(message)
-            self.output_exchange_older.send(message)
+        message_type, client_id, fields = deserialize_msg(message)
+        if message_type == MsgType.WORD_YEAR_AMOUNT:
+            url, date_modified, amount = fields
 
-        elif len(fields) == 5:
-            client_id, url, year, amount = fields
-            if year >= YEAR: # TODO: validar que este bien el >=
+            # Se manda solo a un Average
+            if date_modified >= YEAR: # TODO: validar que este bien el >=
                 key = hashing.get_hash_key(f"{client_id}_{url}", AVERAGE_AMOUNT)
-                self.output_exchange_newer.send_to(message, routing_key=key) # Este se lo manda solo al hash
+                self.output_exchange_average.send_to(message, routing_key=key) 
+            # Se manda a todos los Filter-Average
             else:
-                self.output_exchange_older.send(message) # Este se lo manda a todos
+                self.output_exchange_filter_average.send(message) 
+
+        if message_type == MsgType.END_OF_RECORDS:
+            logging.info("Received EOF")
+
+            self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
+
+            if self.eof_by_client[client_id] == SPLITTER_AMOUNT:
+                self.output_exchange_average.send(message)
+                self.output_exchange_filter_average.send(message)
 
         else:
             nack()

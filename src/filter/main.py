@@ -1,32 +1,87 @@
-"""Punto de entrada de las entidades filter.
-
-La entidad a ejecutar se elige con ``FILTER_ROLE`` (por ejemplo ``q1``). Asi una
-misma imagen Docker puede desplegarse como cualquier filtro cambiando solo las
-variables de entorno.
-"""
-
-import logging
 import os
+import logging
+import signal
+import threading
 
-from filter.year_language import YearLanguageFilter
+from common import middleware
+from common.message_protocol.internal import deserialize_msg, MsgType, serialize_msg
 
-FILTERS = {
-    "q1": YearLanguageFilter,
-}
+ID = int(os.environ["ID"])
+MOM_HOST = os.environ["MOM_HOST"]
+GATEWAY_PREFIX = os.environ["GATEWAY_PREFIX"]
+FILTER_YEAR_PLUS_PREFIX = os.environ["FILTER_YEAR_PLUS_PREFIX"]
+LANGUAGE = os.environ.get("LANGUAGE")
+SECTIONS = os.environ.get("SECTIONS").split(",")
+YEAR = os.environ.get("YEAR")
+
+
+class FilterYearPlus:
+    def __init__(self):
+        self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, f"{GATEWAY_PREFIX}_filter", [f"{GATEWAY_PREFIX}_filter_{ID}"]
+        )
+        self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ( 
+            MOM_HOST, f"{FILTER_YEAR_PLUS_PREFIX}"
+        )
+        self.output_exchange_image = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, f"{FILTER_YEAR_PLUS_PREFIX}_image"
+        )
+
+        self.sections = set(SECTIONS)
+
+        self.end_event = threading.Event()
+        signal.signal(signal.SIGTERM, self.sigterm_handler)
+
+    def process_message(self, message, ack, nack):
+        try:
+            message_type, client_id, fields = deserialize_msg(message)
+            if message_type == MsgType.FILTER_ARTICLE:
+                url, language, date_modified, name, sections, image_url = fields
+
+                if date_modified >= YEAR and language == LANGUAGE:
+                    self.output_exchange.send_to(serialize_msg(MsgType.Q1_RESULT, client_id, url, date_modified), routing_key=client_id)
+
+                elif date_modified >= YEAR and sections & self.sections:
+                    self.output_exchange_image.send_to(serialize_msg(MsgType.GET_IMAGE, client_id, url, name, image_url), routing_key=client_id)
+            
+            elif message_type == MsgType.END_OF_RECORDS:
+                logging.info("Received EOF")
+                self.output_exchange.send_to(serialize_msg(MsgType.END_OF_RECORDS, client_id, MsgType.Q1_RESULT), routing_key=client_id)
+                self.output_exchange_image.send(serialize_msg(MsgType.END_OF_RECORDS, client_id, MsgType.Q2_RESULT))
+
+        except Exception:
+            logging.exception("Error processing message")
+            nack()
+            return
+
+        ack()
+
+    def sigterm_handler(self, signum, frame):
+        if self.end_event.is_set():
+            return
+        self.end_event.set()
+        self.input_exchange.stop_consuming_threadsafe()
+
+    def close(self):
+        for mom in [self.input_exchange, self.output_exchange]:
+            try:
+                mom.close()
+            except Exception as e:
+                logging.error(f"Error closing message middleware: {e}")
+
+    def start(self):
+        try:
+            self.input_exchange.start_consuming(self.process_message)
+        finally:
+            self.close()
 
 
 def main():
     logging.basicConfig(level=logging.INFO)
-
-    role = os.environ.get("FILTER_ROLE", "").strip().lower()
-    if role not in FILTERS:
-        raise SystemExit(
-            f"FILTER_ROLE must be one of {sorted(FILTERS)}, got {role!r}"
-        )
-
-    FILTERS[role]().start()
+    filter_average = FilterYearPlus()
+    filter_average.start()
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()

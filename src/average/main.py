@@ -3,12 +3,13 @@ import logging
 import signal
 import threading
 
-from common import middleware, message_protocol, storage, hashing
+from common import middleware, storage, hashing
+from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 
 ID = int(os.environ["ID"])
 MOM_HOST = os.environ["MOM_HOST"]
 AVERAGE_PREFIX = os.environ["AVERAGE_PREFIX"]
-FILTER_AVERAGE_PREFIX = os.environ["FILTER_AVERAGE_PREFIX"]
+FILTER_YEAR_PREFIX = os.environ["FILTER_YEAR_PREFIX"]
 FILTER_AVERAGE_AMOUNT = int(os.environ["FILTER_AVERAGE_AMOUNT"])
 YEAR = int(os.environ.get("YEAR"))
 
@@ -19,10 +20,10 @@ class Average:
 
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, AVERAGE_PREFIX, [f"{AVERAGE_PREFIX}_{ID}"]
+            MOM_HOST, f"{FILTER_YEAR_PREFIX}_newer", [f"{AVERAGE_PREFIX}_newer_{ID}"]
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, FILTER_AVERAGE_PREFIX
+            MOM_HOST, f"{FILTER_YEAR_PREFIX}_older"
         )
 
         self.urls_by_client = {}
@@ -37,23 +38,24 @@ class Average:
         # for key in self.storage.load_key(client_id):
         #     urls[key.key] = urls.get(key.key, 0) + key.amount
 
-        for word, amount in self.urls_by_client.get(client_id, {}).items():
-            key = hashing.get_hash_key(f"{client_id}_{word}", FILTER_AVERAGE_AMOUNT)
-            self.output_exchange.send_to(message_protocol.internal.serialize([client_id, word, amount, YEAR]), routing_key=key)
+        for url, amount in self.urls_by_client.get(client_id, {}).items():
+            key = hashing.get_hash_key(f"{client_id}_{url}", FILTER_AVERAGE_AMOUNT)
+            self.output_exchange.send_to(serialize_msg(MsgType.WORD_YEAR_AMOUNT, client_id, url, YEAR, amount), routing_key=key)
 
-        self.output_exchange.send(message_protocol.internal.serialize([client_id])) # TODO: Mandar el EOF
+        self.output_exchange.send(serialize_msg(MsgType.END_OF_RECORDS, client_id))
         self.urls_by_client[client_id] = {}
         
 
     def process_message(self, message, ack, nack):
         logging.info("Process message")
-        fields = message_protocol.internal.deserialize(message) # TODO: Validar protocolo
-        if len(fields) == 3:
-            client_id, key, amount = fields
-            self.urls_by_client[client_id] = self.urls_by_client.get(client_id, {})
-            self.urls_by_client[client_id][key] = self.urls_by_client[client_id].get(key, 0) + amount
+        message_type, client_id, fields = deserialize_msg(message)
+        if message_type == MsgType.WORD_YEAR_AMOUNT:
+            url, date_modified, amount = fields
+            urls = self.urls_by_client.setdefault(client_id, {})
+            urls[url] = urls.get(url, 0) + amount
             #self.storage.store_key(*fields)
-        elif len(fields) == 1:
+
+        elif message_type == MsgType.END_OF_RECORDS:
             self._process_eof(*fields)
         else:
             nack()
