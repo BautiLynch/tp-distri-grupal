@@ -50,6 +50,7 @@ test-results/
 logs/
 tmp/
 temp/
+output/
 *.tmp
 
 .DS_Store

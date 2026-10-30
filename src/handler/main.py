@@ -6,7 +6,7 @@ import multiprocessing
 
 from common import middleware
 from common.message_protocol.internal import deserialize_msg, serialize_payload, MsgType as InternalMsgType
-from common.message_protocol.external import serialize_payload, recv_msg, send_msg, MsgType as ExternalMsgType
+from common.message_protocol.external import recv_msg, send_msg, MsgType as ExternalMsgType
 
 SERVER_HOST = os.environ["SERVER_HOST"]
 SERVER_PORT = int(os.environ["SERVER_PORT"])

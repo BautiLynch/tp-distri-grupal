@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 import logging
 import signal
@@ -30,7 +31,7 @@ class FilterYearPlus:
             MOM_HOST, OUTPUT_EXCHANGE_2, [f"{index}" for index in range(IMAGE_GETTER_AMOUNT)]
         )
 
-        self.sections = set(SECTIONS)
+        self.sections = {section.lower() for section in SECTIONS}
 
         self.end_event = threading.Event()
         signal.signal(signal.SIGTERM, self.sigterm_handler)
@@ -41,11 +42,12 @@ class FilterYearPlus:
             if message_type == MsgType.FILTER_ARTICLE:
                 url, language, date_modified, name, sections, image_url = fields
 
-                if date_modified >= YEAR and language == LANGUAGE:
-                    self.output_exchange.send_to(serialize_msg(MsgType.Q1_RESULT, client_id, url, date_modified), routing_key=client_id)
+                if datetime.strptime(date_modified, "%d/%m/%Y %H:%M:%S").year <= YEAR:
+                    if language.lower() == LANGUAGE.lower():
+                        self.output_exchange.send_to(serialize_msg(MsgType.Q1_RESULT, client_id, url, date_modified), routing_key=client_id)
 
-                elif date_modified >= YEAR and sections & self.sections:
-                    self.output_exchange_image.send_to(serialize_msg(MsgType.GET_IMAGE, client_id, url, name, image_url), routing_key=client_id)
+                    elif self.sections.intersection(section.lower() for section in sections):
+                        self.output_exchange_image.send_to(serialize_msg(MsgType.GET_IMAGE, client_id, url, name, image_url), routing_key=client_id)
             
             elif message_type == MsgType.END_OF_RECORDS:
                 logging.info("Received EOF")

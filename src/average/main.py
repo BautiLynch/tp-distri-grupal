@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 import logging
 import signal
@@ -39,9 +40,12 @@ class Average:
         # for key in self.storage.load_key(client_id):
         #     urls[key.key] = urls.get(key.key, 0) + key.amount
 
+        date = datetime(YEAR, 1, 1)
+        formatted_date = date.strftime("%d/%m/%Y %H:%M:%S")
+        
         for url, amount in self.urls_by_client.get(client_id, {}).items():
             key = hashing.get_hash_key(f"{client_id}_{url}", FILTER_AVERAGE_AMOUNT)
-            self.output_exchange.send_to(serialize_msg(MsgType.WORD_YEAR_AMOUNT, client_id, url, YEAR, amount), routing_key=key)
+            self.output_exchange.send_to(serialize_msg(MsgType.WORD_YEAR_AMOUNT, client_id, url, formatted_date, amount), routing_key=key)
 
         self.output_exchange.send(serialize_msg(MsgType.END_OF_RECORDS, client_id))
         self.urls_by_client[client_id] = {}

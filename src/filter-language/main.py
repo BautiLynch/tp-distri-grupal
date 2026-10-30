@@ -11,7 +11,6 @@ MOM_HOST = os.environ["MOM_HOST"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
-YEAR = os.environ.get("YEAR")
 SPLITTER_AMOUNT = int(os.environ["SPLITTER_AMOUNT"])
 
 

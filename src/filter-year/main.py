@@ -3,6 +3,7 @@ import logging
 import signal
 import threading
 
+from datetime import datetime
 from common import middleware, hashing
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 
@@ -15,7 +16,7 @@ FILTER_AVERAGE_EXCHANGE = os.environ["FILTER_AVERAGE_EXCHANGE"]
 FILTER_AVERAGE_AMOUNT = int(os.environ.get("FILTER_AVERAGE_AMOUNT"))
 SPLITTER_AMOUNT = int(os.environ["SPLITTER_AMOUNT"])
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
-YEAR = os.environ.get("YEAR")
+YEAR = int(os.environ.get("YEAR"))
 
 
 class FilterYear:
@@ -48,9 +49,9 @@ class FilterYear:
         message_type, client_id, fields = deserialize_msg(message)
         if message_type == MsgType.WORD_YEAR_AMOUNT:
             url, date_modified, amount = fields
-
+            
             # Se manda solo a un Average
-            if date_modified >= YEAR: # TODO: validar que este bien el >=
+            if datetime.strptime(date_modified, "%d/%m/%Y %H:%M:%S").year <= YEAR:
                 key = hashing.get_hash_key(f"{client_id}_{url}", AVERAGE_AMOUNT)
                 self.output_exchange_average.send_to(message, routing_key=key) 
             # Se manda a todos los Filter-Average

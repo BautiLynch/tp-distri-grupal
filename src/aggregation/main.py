@@ -10,7 +10,7 @@ from common.message_protocol.internal import deserialize_msg, serialize_msg, Msg
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
-OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
+OUTPUT_QUEUE = os.environ["OUTPUT_QUEUE"]
 SPLITTER_AMOUNT = int(os.environ["SPLITTER_AMOUNT"])
 TOP_SIZE = int(os.environ["TOP_SIZE"])
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
@@ -22,7 +22,7 @@ class AggregationFilter:
             MOM_HOST, INPUT_EXCHANGE, [ID]
         )
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
-            MOM_HOST, OUTPUT_EXCHANGE
+            MOM_HOST, OUTPUT_QUEUE
         )
         self.eof_by_client = {}
         self.words_by_client = {}

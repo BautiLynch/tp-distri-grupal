@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 import logging
 import signal
@@ -69,7 +70,7 @@ class FilterAverage:
         if message_type == MsgType.WORD_YEAR_AMOUNT:
             url, date_modified, amount = fields
 
-            if date_modified >= YEAR: # TODO: validar que este bien el >=
+            if datetime.strptime(date_modified, "%d/%m/%Y %H:%M:%S").year <= YEAR:
                 url_count, word_count = self.words_by_client.get(client_id, (0, 0))
                 self.words_by_client[client_id] = (url_count + 1, word_count + amount)
             else:

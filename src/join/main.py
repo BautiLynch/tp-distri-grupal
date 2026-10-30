@@ -17,7 +17,7 @@ class JoinFilter:
 
     def __init__(self):
         self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
-            MOM_HOST, INPUT_QUEUE, []
+            MOM_HOST, INPUT_QUEUE
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, OUTPUT_EXCHANGE, []
@@ -36,8 +36,9 @@ class JoinFilter:
         
         top_client = self.top_by_client.get(client_id, [])
         top_client.extend(new_words)
+        top_client.sort(reverse=True)
 
-        self.top_by_client[client_id] = top_client[-TOP_SIZE:] # TODO: Xq tomo un slice? No manda directamente el TOP_SIZE el Agg?
+        self.top_by_client[client_id] = top_client[:TOP_SIZE]
 
     def _all_tops_recieved(self, client_id):
         self.agg_by_client[client_id] = self.agg_by_client.get(client_id, 0) + 1

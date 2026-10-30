@@ -13,6 +13,7 @@ class MsgType(IntEnum):
     END_OF_RECORDS = auto()
     SPLITTER_ARTICLE = auto()
     GET_IMAGE = auto()
+    FILTER_ARTICLE = auto()
 
 
 UINT32_SIZE = 4
@@ -80,9 +81,22 @@ def _serialize_splitter_article(url, language, date_modified, abstract):
     return _serialize_texts((url, language, date_modified, abstract))
 
 
-def _serialize_word(url, language, date_modified, word, amount): # TODO: Revisar xq cambia el ms segun la query
-    payload = _serialize_texts((url, language, date_modified, word))
+def _serialize_word_language(word, language):
+    return _serialize_texts((word, language))
+
+
+def _serialize_word_amount(word):
+    # Splitter envia una ocurrencia; aggregation incrementa el contador.
+    return _serialize_texts((word,))
+
+
+def _serialize_word_year_amount(url, date_modified, amount):
+    payload = _serialize_texts((url, date_modified))
     return payload + amount.to_bytes(UINT32_SIZE, "big")
+
+
+def _serialize_get_image(url, name, image_url):
+    return _serialize_texts((url, name, image_url))
 
 
 def _serialize_query1_result(url, date_modified):
@@ -94,18 +108,21 @@ def _serialize_query2_result(name, url, image_bytes):
     return payload + image_bytes
 
 def _serialize_query4_result(top_list):
-    payload += len(top_list).to_bytes(UINT32_SIZE, "big")
+    payload = len(top_list).to_bytes(UINT32_SIZE, "big")
     for word, amount in top_list:
         payload += _serialize_texts((word,))
         payload += amount.to_bytes(UINT32_SIZE, "big")
     return payload
 
-def _serialize_query3_result(word, client_id):
-    return _serialize_texts((word, str(client_id)))
+def _serialize_query3_result(word):
+    return _serialize_texts((word,))
+
+
+def _serialize_query5_result(url, amount):
+    return _serialize_texts((url,)) + amount.to_bytes(UINT32_SIZE, "big")
 
 def _serialize_end(message_type):
-    payload += message_type.to_bytes(UINT32_SIZE, "big")
-    return payload
+    return message_type.to_bytes(UINT32_SIZE, "big")
 
 def _serialize_empty():
     return b""
@@ -157,11 +174,29 @@ def _deserialize_splitter_article(payload):
     return fields
 
 
-def _deserialize_word(payload):
-    fields, offset = _deserialize_texts(payload, 4)
+def _deserialize_word_language(payload):
+    fields, offset = _deserialize_texts(payload, 2)
+    _check_end(payload, offset)
+    return fields
+
+
+def _deserialize_word_amount(payload):
+    fields, offset = _deserialize_texts(payload, 1)
+    _check_end(payload, offset)
+    return fields
+
+
+def _deserialize_word_year_amount(payload):
+    fields, offset = _deserialize_texts(payload, 2)
     amount, offset = _deserialize_uint32(payload, offset)
     _check_end(payload, offset)
     return fields + (amount,)
+
+
+def _deserialize_get_image(payload):
+    fields, offset = _deserialize_texts(payload, 3)
+    _check_end(payload, offset)
+    return fields
 
 
 def _deserialize_query1_result(payload):
@@ -180,25 +215,31 @@ def _deserialize_query2_result(payload):
     return fields + (image_bytes,)
 
 def _deserialize_query3_result(payload):
-    fields, offset = _deserialize_texts(payload, 2)
+    fields, offset = _deserialize_texts(payload, 1)
     _check_end(payload, offset)
     return fields
 
 def _deserialize_query4_result(payload):
-    client_id, offset = _deserialize_uint32(payload, 0)
-    top_list_count, offset = _deserialize_uint32(payload, offset)
+    top_list_count, offset = _deserialize_uint32(payload, 0)
     top_list = []
     for _ in range(top_list_count):
         word, offset = _deserialize_text(payload, offset)
         amount, offset = _deserialize_uint32(payload, offset)
         top_list.append((word, amount))
     _check_end(payload, offset)
-    return (client_id, top_list)
+    return (top_list,)
+
+
+def _deserialize_query5_result(payload):
+    fields, offset = _deserialize_texts(payload, 1)
+    amount, offset = _deserialize_uint32(payload, offset)
+    _check_end(payload, offset)
+    return fields + (amount,)
 
 def _deserialize_end(payload):
     message_type, offset = _deserialize_uint32(payload, 0)
     _check_end(payload, offset)
-    return (message_type)
+    return (message_type,)
 
 def _deserialize_empty(payload):
     _check_end(payload, 0)
@@ -208,11 +249,15 @@ def _deserialize_empty(payload):
 RECV_MSG_HANDLERS = {
     MsgType.FILTER_ARTICLE: _deserialize_filter_article,
     MsgType.SPLITTER_ARTICLE: _deserialize_splitter_article,
-    MsgType.WORD: _deserialize_word,
+    MsgType.WORD_LANGUAGE: _deserialize_word_language,
+    MsgType.WORD_AMOUNT: _deserialize_word_amount,
+    MsgType.WORD_YEAR_AMOUNT: _deserialize_word_year_amount,
+    MsgType.GET_IMAGE: _deserialize_get_image,
     MsgType.Q1_RESULT: _deserialize_query1_result,
     MsgType.Q2_RESULT: _deserialize_query2_result,
     MsgType.Q3_RESULT: _deserialize_query3_result,
     MsgType.Q4_RESULT: _deserialize_query4_result,
+    MsgType.Q5_RESULT: _deserialize_query5_result,
     MsgType.END_OF_RECORDS: _deserialize_empty,
     MsgType.QUERY_END: _deserialize_end,
 }
@@ -220,11 +265,15 @@ RECV_MSG_HANDLERS = {
 SEND_MSG_HANDLERS = {
     MsgType.FILTER_ARTICLE: _serialize_filter_article,
     MsgType.SPLITTER_ARTICLE: _serialize_splitter_article,
-    MsgType.WORD: _serialize_word,
+    MsgType.WORD_LANGUAGE: _serialize_word_language,
+    MsgType.WORD_AMOUNT: _serialize_word_amount,
+    MsgType.WORD_YEAR_AMOUNT: _serialize_word_year_amount,
+    MsgType.GET_IMAGE: _serialize_get_image,
     MsgType.Q1_RESULT: _serialize_query1_result,
     MsgType.Q2_RESULT: _serialize_query2_result,
     MsgType.Q3_RESULT: _serialize_query3_result,
     MsgType.Q4_RESULT: _serialize_query4_result,
+    MsgType.Q5_RESULT: _serialize_query5_result,
     MsgType.END_OF_RECORDS: _serialize_empty,
     MsgType.QUERY_END: _serialize_end,
 }
