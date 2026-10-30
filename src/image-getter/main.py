@@ -8,7 +8,7 @@ from common import middleware, message_protocol
 
 ID = int(os.environ["ID"])
 MOM_HOST = os.environ["MOM_HOST"]
-OUTPUT_QUEUE = os.environ["OUTPUT_QUEUE"]
+OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 IMAGE_PREFIX = os.environ["IMAGE_PREFIX"]
 
 class ImageGetter:
@@ -16,8 +16,8 @@ class ImageGetter:
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, IMAGE_PREFIX, [f"{IMAGE_PREFIX}_{ID}"]
         )
-        self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
-            MOM_HOST, OUTPUT_QUEUE
+        self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, OUTPUT_EXCHANGE
         )
 
         self.end_event = threading.Event()
@@ -26,7 +26,7 @@ class ImageGetter:
     def _get_image(self, client_id, title, url, image_url):
         with urllib.request.urlopen(image_url) as response:
             message = [client_id, title, url, response.read()]
-            self.output_queue.send(message_protocol.internal.serialize(message))
+            self.output_exchange.send_to(message_protocol.internal.serialize(message), routing_key=client_id)
 
     def process_message(self, message, ack, nack):
         logging.info("Process message")
@@ -35,7 +35,7 @@ class ImageGetter:
             self._get_image(*fields)
         elif len(fields) == 1:
             logging.info("Received EOF")
-            self.output_queue.send(message)
+            self.output_exchange.send_to(message, routing_key=fields[0])
         else:
             nack()
             return

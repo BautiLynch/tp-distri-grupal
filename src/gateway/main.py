@@ -135,7 +135,7 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
                     client_id, message_protocol.internal.INPUT_QUERY_ID,
                 )
                 for routing_key in filter_routing_keys():
-                    filter_exchange.send_rk(end_of_records, routing_key)
+                    filter_exchange.send_to(end_of_records, routing_key)
                 splitter_queue.send(end_of_records)
             message_protocol.external.send_msg(
                 client_socket, message_protocol.external.MsgType.ACK

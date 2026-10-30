@@ -4,8 +4,7 @@ import logging
 import signal
 import threading
 
-from common import middleware, message_protocol
-from aggregation.store import Storage
+from common import middleware, message_protocol, storage
 
 ID = int(os.environ["ID"])
 MOM_HOST = os.environ["MOM_HOST"]
@@ -25,32 +24,37 @@ class AggregationFilter:
             MOM_HOST, OUTPUT_QUEUE
         )
 
-        self.storage = Storage(STORAGE_PATH)
+        self.words_by_client = {}
+        self.storage = storage.Storage(STORAGE_PATH)
         self.end_event = threading.Event()
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def _process_eof(self, client_id):
         logging.info("Received EOF")
 
-        top_words = {}
-        for word in self.storage.load_words(client_id):
-            top_words[word.word] += word.amount
+        # for key in self.storage.load_key(client_id):
+        #    top_words[key.key] = top_words.get(key.key, 0) + key.amount
 
         top_parcial = heapq.nlargest(
             TOP_SIZE,
-            top_words.items(),
+            self.words_by_client.get(client_id, {}).items(),
             key=lambda item: item[1],
         )
 
+        self.words_by_client[client_id] = {}
+
         message = [client_id, top_parcial]
-        self.output_queue.send(message_protocol.internal.serialize(message))
+        self.output_queue.send_to(message_protocol.internal.serialize(message), routing_key=client_id)
         
 
     def process_message(self, message, ack, nack):
         logging.info("Process message")
         fields = message_protocol.internal.deserialize(message) # TODO: Validar protocolo
         if len(fields) == 3:
-            self.storage.store_words(*fields)
+            client_id, key, _ = fields
+            self.words_by_client[client_id] = self.words_by_client.get(client_id, {})
+            self.words_by_client[client_id][key] = self.words_by_client[client_id].get(key, 0) + 1
+            #self.storage.store_key(client_id, key, 1)
         elif len(fields) == 1:
             self._process_eof(*fields)
         else:

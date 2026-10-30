@@ -126,13 +126,13 @@ class YearLanguageFilter:
             message_protocol.internal.MsgType.Q1_RESULT,
             client_id, QUERY_ID, url, date_modified,
         )
-        self.output_exchange.send_rk(message, str(client_id))
+        self.output_exchange.send_to(message, str(client_id))
 
     def _finish(self, client_id):
         message = message_protocol.internal.serialize_msg(
             message_protocol.internal.MsgType.QUERY_END, client_id, QUERY_ID,
         )
-        self.output_exchange.send_rk(message, str(client_id))
+        self.output_exchange.send_to(message, str(client_id))
 
     def start(self):
         logging.info(

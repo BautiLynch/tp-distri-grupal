@@ -1,13 +1,13 @@
 import csv
 from collections.abc import Iterator
 import os
-from common import word_item
+from common import key_item
 
 class Storage:
     def __init__(self, storage_path) -> None:
         self.storage_path = storage_path
 
-    def store_words(self, client_id, word, amount) -> None:
+    def store_key(self, client_id, key, amount) -> None:
         os.makedirs(self.storage_path, exist_ok=True)
 
         file_path = os.path.join(
@@ -17,9 +17,9 @@ class Storage:
 
         with open(file_path, "a", newline="", encoding="utf-8") as file:
             writer = csv.writer(file, quoting=csv.QUOTE_MINIMAL)
-            writer.writerow([word, 1])
+            writer.writerow([key, amount])
 
-    def load_words(self, client_id) -> Iterator[word_item.WordItem]:
+    def load_key(self, client_id) -> Iterator[key_item.KeyItem]:
         os.makedirs(self.storage_path, exist_ok=True)
         
         file_path = os.path.join(
@@ -30,8 +30,8 @@ class Storage:
         with open(file_path, "r") as file:
             reader = csv.reader(file, quoting=csv.QUOTE_MINIMAL)
             for row in reader:
-                [word, amount] = row
-                yield word_item.WordItem(
-                    word,
+                [key, amount] = row
+                yield key_item.KeyItem(
+                    key,
                     int(amount)
                 )
