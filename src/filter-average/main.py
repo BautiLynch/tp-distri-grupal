@@ -25,8 +25,10 @@ class FilterAverage:
         )
 
         self.eof_by_client = {}
-        self.average_by_client = {}
         self.words_by_client = {}
+        self.average_by_client = {}
+        self.pending_messages_by_client = {}
+
         self.end_event = threading.Event()
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
@@ -39,13 +41,20 @@ class FilterAverage:
             amount_urls, amount_words = self.words_by_client.get(client_id, (0, 0))
             self.average_by_client[client_id] = amount_words / amount_urls if amount_urls > 0 else 0
 
+            for url, amount_words in self.pending_messages_by_client.get(client_id, []):
+                self._process_abstract(client_id, url, amount_words)
+
         elif self.eof_by_client[client_id] == AVERAGE_AMOUNT + 1:
             self.output_exchange.send_to(message_protocol.internal.serialize([client_id,]), routing_key=client_id) # TODO: Mandar el EOF
 
     def _process_abstract(self, client_id, url, amount_words):
         logging.info("Received abstract")
 
-        # TODO: deberia validar que exista el average o guardar hasta que llegue el EOF
+        if self.average_by_client.get(client_id) is None:
+            logging.warning(f"Average for client {client_id} not calculated yet")
+            self.pending_messages_by_client[client_id] = self.pending_messages_by_client.get(client_id, [])
+            self.pending_messages_by_client[client_id].append((url, amount_words))
+            return
         
         if amount_words > self.average_by_client[client_id]:
             message = [client_id, url, amount_words]
