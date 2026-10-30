@@ -38,8 +38,6 @@ class FilterYear:
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def _process_eof(self, client_id):
-        logging.info("Received EOF")
-
         amount_urls, amount_words = self.words_by_client.get(client_id, (0, 0))
         self.average_by_client[client_id] = amount_words / amount_urls if amount_urls > 0 else 0
 
@@ -58,8 +56,6 @@ class FilterYear:
                 self.output_exchange_average.send_to(message, routing_key=key)
 
         elif message_type == MsgType.END_OF_RECORDS:
-            logging.info("Received EOF")
-
             self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
 
             if self.eof_by_client[client_id] == SPLITTER_AMOUNT:

@@ -37,8 +37,6 @@ class FilterAverage:
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def _process_eof(self, client_id):
-        logging.info("Received EOF")
-
         self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
         if self.eof_by_client[client_id] == FILTER_YEAR_AMOUNT: 
             amount_urls, amount_words = self.words_by_client.get(client_id, (0, 0))

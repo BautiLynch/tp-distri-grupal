@@ -105,7 +105,6 @@ class Splitter:
                 self._split_and_send(client_id, fields)
 
             elif message_type == MsgType.END_OF_RECORDS:
-                logging.info("Received EOF")
                 self.output_exchange_3.send(message)
                 self.output_exchange_4.send(message)
                 self.output_exchange_5.send(message) 

@@ -50,7 +50,6 @@ class FilterYearPlus:
                         self.output_exchange_image.send_to(serialize_msg(MsgType.GET_IMAGE, client_id, url, name, image_url), routing_key=client_id)
             
             elif message_type == MsgType.END_OF_RECORDS:
-                logging.info("Received EOF")
                 self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q1_RESULT), routing_key=client_id)
                 self.output_exchange_image.send(serialize_msg(MsgType.END_OF_RECORDS, client_id))
 

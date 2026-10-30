@@ -31,8 +31,6 @@ class AggregationFilter:
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def _process_eof(self, client_id):
-        logging.info("Received EOF")
-
         # for key in self.storage.load_key(client_id):
         #    top_words[key.key] = top_words.get(key.key, 0) + key.amount
 

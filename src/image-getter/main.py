@@ -39,8 +39,6 @@ class ImageGetter:
             self._get_image(client_id, name, url, image_url)
 
         elif message_type == MsgType.END_OF_RECORDS:
-            logging.info("Received EOF")
-
             self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
             if self.eof_by_client[client_id] == FILTER_YEAR_PLUS_AMOUNT:
                 self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q2_RESULT), routing_key=client_id)

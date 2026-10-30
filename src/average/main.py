@@ -34,8 +34,6 @@ class Average:
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def _process_eof(self, client_id):
-        logging.info("Received EOF")
-
         # urls = {}
         # for key in self.storage.load_key(client_id):
         #     urls[key.key] = urls.get(key.key, 0) + key.amount
