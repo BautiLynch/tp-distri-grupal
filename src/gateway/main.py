@@ -1,8 +1,10 @@
-import os
+import json
 import logging
-import socket
-import signal
 import multiprocessing
+import os
+import signal
+import socket
+
 from common import middleware, message_protocol
 
 SERVER_HOST = os.environ["SERVER_HOST"]
@@ -10,8 +12,10 @@ SERVER_PORT = int(os.environ["SERVER_PORT"])
 MOM_HOST = os.environ["MOM_HOST"]
 FILTER_QUEUE = os.environ["FILTER_QUEUE"]
 SPLITTER_QUEUE = os.environ["SPLITTER_QUEUE"]
+HANDLER_HOST = os.environ["HANDLER_HOST"]
+HANDLER_PORT = int(os.environ["HANDLER_PORT"])
 
-FITLER_FIELDS = ("date_modified", "image", "in_language", "name", "sections", "url")
+FILTER_FIELDS = ("date_modified", "image", "in_language", "name", "sections", "url")
 SPLITTER_FIELDS = ("abstract", "date_modified", "in_language", "name", "sections", "url")
 
 
@@ -23,6 +27,13 @@ def filter_article_fields(article, fields):
     return filtered_article
 
 
+def parse_article_line(line):
+    article = json.loads(line.decode("utf-8"))
+    if not isinstance(article, dict):
+        raise ValueError("Each dataset line must contain a JSON object")
+    return article
+
+
 def handle_client_request(client_socket, client_id, client_dict, sigterm_received):
     filter_queue = None
     splitter_queue = None
@@ -30,22 +41,31 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
         message_protocol.external.send_msg(
             client_socket, message_protocol.external.MsgType.CLIENT_ID, client_id
         )
+        message_protocol.external.send_msg(
+            client_socket, message_protocol.external.MsgType.HANDLER_ADDRESS,
+            HANDLER_HOST, HANDLER_PORT,
+        )
         filter_queue = middleware.MessageMiddlewareQueueRabbitMQ(MOM_HOST, FILTER_QUEUE)
         splitter_queue = middleware.MessageMiddlewareQueueRabbitMQ(MOM_HOST, SPLITTER_QUEUE)
         while True:
             message_type, article = message_protocol.external.recv_msg(client_socket)
             if message_type not in (
                 message_protocol.external.MsgType.ARTICLE,
+                message_protocol.external.MsgType.ARTICLE_LINE,
                 message_protocol.external.MsgType.END_OF_RECORDS,
             ):
                 raise ValueError("Expected an article or end of records")
-            if message_type == message_protocol.external.MsgType.ARTICLE:
-                filter_queue.send(
-                    message_protocol.internal.serialize_article(client_id, filter_article_fields(article, FITLER_FIELDS))
+            if message_type == message_protocol.external.MsgType.ARTICLE_LINE:
+                article = parse_article_line(article)
+            if message_type != message_protocol.external.MsgType.END_OF_RECORDS:
+                filtered = message_protocol.internal.serialize_article(
+                    client_id, filter_article_fields(article, FILTER_FIELDS)
                 )
-                splitter_queue.send(
-                    message_protocol.internal.serialize_article(client_id, filter_article_fields(article, SPLITTER_FIELDS))
+                split = message_protocol.internal.serialize_article(
+                    client_id, filter_article_fields(article, SPLITTER_FIELDS)
                 )
+                filter_queue.send(filtered)
+                splitter_queue.send(split)
             else:
                 end_of_records = message_protocol.internal.serialize_end_of_records(client_id)
                 filter_queue.send(end_of_records)

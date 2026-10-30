@@ -3,6 +3,9 @@ class MsgType:
     CLIENT_ID = 2
     ACK = 3
     END_OF_RECORDS = 4
+    ARTICLE_LINE = 5
+    HANDLER_ADDRESS = 6
+    RESULT = 7
 
 
 UINT32_SIZE = 4
@@ -70,6 +73,38 @@ def _serialize_text(value):
     return _serialize_bytes(value.encode("utf-8"))
 
 
+def _recv_handler_address(connection):
+    host = _recv_text(connection)
+    port = _recv_uint32(connection)
+    _validate_address(host, port)
+    return host, port
+
+
+def _validate_address(host, port):
+    if not isinstance(host, str) or not host.strip():
+        raise ValueError("Handler host must not be empty")
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError("Handler port must be between 1 and 65535")
+
+
+def _serialize_handler_address(host, port):
+    _validate_address(host, port)
+    return _serialize_text(host) + _serialize_uint32(port)
+
+
+def _recv_result(connection):
+    query_id = _recv_uint32(connection)
+    if query_id == 0:
+        raise ValueError("Query ID must be positive")
+    return query_id, _recv_bytes(connection)
+
+
+def _serialize_result(query_id, payload):
+    if type(query_id) is not int or query_id <= 0:
+        raise ValueError("Query ID must be positive")
+    return _serialize_uint32(query_id) + _serialize_bytes(payload)
+
+
 def _recv_article(connection):
     field_count = _recv_uint32(connection)
     article = {}
@@ -106,6 +141,9 @@ RECV_MSG_HANDLERS = {
     MsgType.CLIENT_ID: _recv_client_id,
     MsgType.ACK: _recv_empty,
     MsgType.END_OF_RECORDS: _recv_empty,
+    MsgType.ARTICLE_LINE: _recv_bytes,
+    MsgType.HANDLER_ADDRESS: _recv_handler_address,
+    MsgType.RESULT: _recv_result,
 }
 
 SEND_MSG_HANDLERS = {
@@ -113,6 +151,9 @@ SEND_MSG_HANDLERS = {
     MsgType.CLIENT_ID: _serialize_client_id,
     MsgType.ACK: _serialize_empty,
     MsgType.END_OF_RECORDS: _serialize_empty,
+    MsgType.ARTICLE_LINE: _serialize_bytes,
+    MsgType.HANDLER_ADDRESS: _serialize_handler_address,
+    MsgType.RESULT: _serialize_result,
 }
 
 

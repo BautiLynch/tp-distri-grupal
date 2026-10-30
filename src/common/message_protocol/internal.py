@@ -1,3 +1,5 @@
+import json
+
 from . import external
 
 
@@ -30,7 +32,14 @@ def _serialize(message_type, client_id, query_id, payload):
 
 def serialize_result(client_id, query_id, external_type, *fields):
     message = external.serialize_msg(external_type, *fields)
-    return _serialize(MsgType.RESULT, client_id, query_id, message)
+    return serialize_result_bytes(client_id, query_id, message)
+
+
+def serialize_result_bytes(client_id, query_id, payload):
+    """Keep the query's payload opaque; the handler adds its external envelope."""
+    if not isinstance(payload, bytes):
+        raise ValueError("Result payload must be bytes")
+    return _serialize(MsgType.RESULT, client_id, query_id, payload)
 
 
 def serialize_query_end(client_id, query_id):
@@ -56,7 +65,14 @@ def deserialize_result(message):
 
 
 def serialize_article(client_id, article):
-    return _serialize(MsgType.ARTICLE, client_id, INPUT_QUERY_ID, external._serialize_article(article))
+    if not isinstance(article, dict):
+        raise ValueError("An article must be a dictionary")
+    fields = {
+        name: json.dumps(value, ensure_ascii=False, allow_nan=False)
+        for name, value in article.items()
+    }
+    payload = external._serialize_article(fields)
+    return _serialize(MsgType.ARTICLE, client_id, INPUT_QUERY_ID, payload)
 
 
 def serialize_end_of_records(client_id):
@@ -91,7 +107,7 @@ def deserialize_input(message):
         value, offset = _deserialize_text(payload, offset)
         if name in article:
             raise ValueError("Repeated article field")
-        article[name] = value
+        article[name] = json.loads(value)
     if offset != len(payload):
         raise ValueError("Unexpected bytes after the article")
     return message_type, client_id, article

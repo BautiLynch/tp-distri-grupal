@@ -38,8 +38,15 @@ class ClientHandler:
     def handle_result(self, message, ack, nack):
         try:
             message_type, _, query_id, payload = message_protocol.internal.deserialize_result(message)
+            if not 1 <= query_id <= message_protocol.internal.QUERY_COUNT:
+                raise ValueError("Unknown query ID")
             if message_type == message_protocol.internal.MsgType.RESULT:
-                message_protocol.external.send_all(self.client_socket, payload)
+                if query_id in self.completed_queries:
+                    raise ValueError("Result received after query completion")
+                message_protocol.external.send_msg(
+                    self.client_socket, message_protocol.external.MsgType.RESULT,
+                    query_id, payload,
+                )
             elif message_type == message_protocol.internal.MsgType.QUERY_END:
                 self.completed_queries.add(query_id)
                 if len(self.completed_queries) == message_protocol.internal.QUERY_COUNT:
