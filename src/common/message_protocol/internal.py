@@ -15,7 +15,6 @@ class MsgType(IntEnum):
     GET_IMAGE = auto()
 
 
-QUERY_COUNT = 5
 UINT32_SIZE = 4
 MESSAGE_TYPE_OFFSET = 0
 CLIENT_ID_OFFSET = MESSAGE_TYPE_OFFSET + UINT32_SIZE
@@ -28,23 +27,23 @@ def _serialize(message_type, client_id, payload):
         message_type.to_bytes(UINT32_SIZE, byteorder="big") +
         client_id.to_bytes(UINT32_SIZE, byteorder="big") +
         len(payload).to_bytes(UINT32_SIZE, byteorder="big") +
-        _serialize_payload(payload)
+        payload
     )
 
 # HEADER (type, client_id, payload_size) + PAYLOAD
 # PAYLOAD: (tamaño de cada campo + campo) * cantidad de campos
-def _serialize_payload(*fields):
-    parts = []
-    for value in fields:
-        if isinstance(value, str):
-            value = value.encode("utf-8")
-        elif not isinstance(value, (bytes, bytearray, memoryview)):
-            raise ValueError("Record fields must be str or bytes")
+# def _serialize_payload(*fields):
+#     parts = []
+#     for value in fields:
+#         if isinstance(value, str):
+#             value = value.encode("utf-8")
+#         elif not isinstance(value, (bytes, bytearray, memoryview)):
+#             raise ValueError("Record fields must be str or bytes")
         
-        parts.append(len(value).to_bytes(UINT32_SIZE, "big"))
-        parts.append(value)
+#         parts.append(len(value).to_bytes(UINT32_SIZE, "big"))
+#         parts.append(value)
 
-    return b"".join(parts)
+#     return b"".join(parts)
 
 def _deserialize(message):
     if len(message) < HEADER_SIZE:
