@@ -1,109 +1,220 @@
-﻿import logging
+﻿import json
+import logging
 import multiprocessing
 import os
 import signal
 import socket
 
-from worker import Worker
-
+from common import middleware, message_protocol
 
 SERVER_HOST = os.environ["SERVER_HOST"]
 SERVER_PORT = int(os.environ["SERVER_PORT"])
+MOM_HOST = os.environ["MOM_HOST"]
+FILTER_PREFIX = os.environ["FILTER_PREFIX"]
+FILTER_AMOUNT = int(os.environ["FILTER_AMOUNT"])
+SPLITTER_QUEUE = os.environ["SPLITTER_QUEUE"]
+HANDLER_HOST = os.environ["HANDLER_HOST"]
+HANDLER_PORT = int(os.environ["HANDLER_PORT"])
+
+if FILTER_AMOUNT < 1:
+    raise ValueError("FILTER_AMOUNT must be greater than zero")
 
 
-class Gateway:
-    def __init__(self):
-        self.client_dict = {}
-        self.client_id = 0
+def parse_article(payload):
+    article = json.loads(payload.decode("utf-8"))
+    if not isinstance(article, dict):
+        raise ValueError("ARTICLE must contain a JSON object")
+    return article
 
-    def start(self):
-        with multiprocessing.Manager() as manager:
-            self.sigterm_received = manager.Value("h", 0)
-            cpu_count = getattr(os, "process_cpu_count", os.cpu_count) # TODO: Hace falta crear tantos procesos?
-            with multiprocessing.Pool(processes=cpu_count()) as self.processes_pool:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as self.server_socket:
-                    previous_handler = signal.signal(signal.SIGTERM, self.sigterm_handler)
-                    try:
-                        self.server_socket.bind((SERVER_HOST, SERVER_PORT))
-                        self.server_socket.listen()
-                        self.server_socket.settimeout(1)
-                        logging.info("Listening to connections")
-                        return self.accept_clients()
-                    finally: # TODO: Me chifla un agente que acá se puede quedar bloqueado si "recv_msg" de un worker se queda bloqueado"
-                        try:
-                            self.shutdown()
-                            self.processes_pool.close()
-                            self.processes_pool.join()
-                        finally:
-                            signal.signal(signal.SIGTERM, previous_handler)
 
-    def accept_clients(self):
-        while not self.sigterm_received.value:
-            try:
-                client_socket, _ = self.server_socket.accept()
-                if self.sigterm_received.value:
-                    client_socket.close()
-                    break
-                logging.info("A new client has connected")
-                self.client_id += 1
-                self.client_dict[self.client_id] = client_socket
-                self.create_worker(client_socket, self.client_id)
-            except socket.timeout:
-                continue
-            except OSError:
-                if not self.sigterm_received.value:
-                    logging.exception("The connection with the client was lost")
-                    return 1
-                return 0
-            except Exception:
-                logging.exception("Error accepting a client")
-                return 2
-        return 0
+def article_text(article, field, default=None):
+    value = article.get(field)
+    if value is None:
+        value = default
+    if not isinstance(value, str):
+        raise ValueError(f"Article field {field} must be text")
+    return value
 
-    # TODO: Me chifla un agente que deberiamos usar directo "multiprocessing.Process"
-    def create_worker(self, client_socket, client_id):
-        worker = Worker(client_socket, client_id, self.sigterm_received)
 
-        def release_client(_):
-            self.client_dict.pop(client_id, None)
-            client_socket.close()
+def section_names(sections):
+    if sections is None:
+        return ()
+    if not isinstance(sections, list):
+        raise ValueError("Article sections must be a list")
+    names = []
+    _collect_section_names(sections, names)
+    return tuple(names)
 
-        def worker_failed(error):
-            logging.error("Client %s worker failed: %s", client_id, error)
-            release_client(None)
 
-        try:
-            self.processes_pool.apply_async(
-                worker.start,
-                callback=release_client,
-                error_callback=worker_failed,
+def _collect_section_names(sections, names):
+    for section in sections:
+        if not isinstance(section, dict):
+            raise ValueError("Article section must be an object")
+        if section.get("type") != "section":
+            continue
+        name = section.get("name")
+        if name is not None:
+            names.append(article_text(section, "name"))
+        parts = section.get("has_parts") or []
+        if not isinstance(parts, list):
+            raise ValueError("Section has_parts must be a list")
+        _collect_section_names(parts, names)
+
+
+def preprocess_article(article):
+    name = article_text(article, "name")
+    url = article_text(article, "url")
+    date_modified = article_text(article, "date_modified")
+    language = article.get("in_language")
+    if not isinstance(language, dict):
+        raise ValueError("Article in_language must contain an identifier")
+    language = article_text(language, "identifier")
+    image = article.get("image")
+    if image is not None and not isinstance(image, dict):
+        raise ValueError("Article image must be an object")
+    image_url = article_text(image or {}, "content_url", "")
+    filtered = (
+        name, url, language, date_modified, image_url,
+        section_names(article.get("sections")),
+    )
+    split = (
+        url, language, date_modified, article_text(article, "abstract", ""),
+    )
+    return filtered, split
+
+
+def filter_routing_key(index):
+    return f"{FILTER_PREFIX}_{index % FILTER_AMOUNT}"
+
+
+def filter_routing_keys():
+    return [f"{FILTER_PREFIX}_{index}" for index in range(FILTER_AMOUNT)]
+
+
+def handle_client_request(client_socket, client_id, client_dict, sigterm_received):
+    filter_exchange = None
+    splitter_queue = None
+    article_index = 0
+    try:
+        message_protocol.external.send_msg(
+            client_socket, message_protocol.external.MsgType.CLIENT_ID, client_id
+        )
+        message_protocol.external.send_msg(
+            client_socket, message_protocol.external.MsgType.HANDLER_ADDRESS,
+            HANDLER_HOST, HANDLER_PORT,
+        )
+        filter_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, FILTER_PREFIX, []
+        )
+        splitter_queue = middleware.MessageMiddlewareQueueRabbitMQ(
+            MOM_HOST, SPLITTER_QUEUE
+        )
+        while True:
+            message_type, article = message_protocol.external.recv_msg(client_socket)
+            if message_type not in (
+                message_protocol.external.MsgType.ARTICLE,
+                message_protocol.external.MsgType.END_OF_RECORDS,
+            ):
+                raise ValueError("Expected an article or end of records")
+            if message_type == message_protocol.external.MsgType.ARTICLE:
+                filtered_article, splitter_article = preprocess_article(parse_article(article))
+                filtered = message_protocol.internal.serialize_msg(
+                    message_protocol.internal.MsgType.FILTER_ARTICLE,
+                    client_id, message_protocol.internal.INPUT_QUERY_ID, *filtered_article,
+                )
+                split = message_protocol.internal.serialize_msg(
+                    message_protocol.internal.MsgType.SPLITTER_ARTICLE,
+                    client_id, message_protocol.internal.INPUT_QUERY_ID, *splitter_article,
+                )
+                filter_exchange.send_rk(filtered, filter_routing_key(article_index))
+                article_index += 1
+                splitter_queue.send(split)
+            else:
+                end_of_records = message_protocol.internal.serialize_msg(
+                    message_protocol.internal.MsgType.END_OF_RECORDS,
+                    client_id, message_protocol.internal.INPUT_QUERY_ID,
+                )
+                for routing_key in filter_routing_keys():
+                    filter_exchange.send_to(end_of_records, routing_key)
+                splitter_queue.send(end_of_records)
+            message_protocol.external.send_msg(
+                client_socket, message_protocol.external.MsgType.ACK
             )
-        except Exception:
-            release_client(None)
-            raise
+            if message_type == message_protocol.external.MsgType.END_OF_RECORDS:
+                break
+    except (socket.error, EOFError) as e:
+        if not sigterm_received.value:
+            logging.error("Client %s disconnected: %s", client_id, e)
+    except Exception as e:
+        logging.error("Client %s: %s", client_id, e)
+    finally:
+        for mom in (filter_exchange, splitter_queue):
+            if mom is not None:
+                try:
+                    mom.close()
+                except Exception:
+                    logging.exception("Could not close a gateway output connection")
+        try:
+            client_socket.shutdown(socket.SHUT_RDWR)
+        except socket.error as e:
+            logging.debug("Client %s already disconnected: %s", client_id, e)
+        client_socket.close()
+        client_dict.pop(client_id, None)
 
-    def sigterm_handler(self, signum, frame):
-        self.shutdown() # TODO: Se supone que el shutdown se hace en el "finally" del "start"
 
-    def shutdown(self): # TODO: Creo q no es idempotente 
-        if self.sigterm_received is not None:
-            self.sigterm_received.value = 1
-        connections = list(self.client_dict.values())
-        if self.server_socket is not None:
-            connections.append(self.server_socket)
-        for connection in connections:
-            try:
-                connection.shutdown(socket.SHUT_RDWR)
-            except OSError as error:
-                logging.debug("Socket already disconnected during shutdown: %s", error)
-        if self.server_socket is not None:
-            self.server_socket.close()
+def handle_sigterm(server_socket, client_dict, sigterm_received):
+    sigterm_received.value = 1
+    for connection in [server_socket, *client_dict.values()]:
+        try:
+            connection.shutdown(socket.SHUT_RDWR)
+        except socket.error as e:
+            logging.debug("Socket already disconnected during shutdown: %s", e)
 
 
 def main():
     logging.basicConfig(level=logging.INFO)
-    gateway = Gateway()
-    gateway.start()
+
+    with multiprocessing.Manager() as manager:
+        client_dict = manager.dict()
+        sigterm_received = manager.Value("c_short", 0)
+        with multiprocessing.Pool(processes=os.process_cpu_count()) as processes_pool:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+                server_socket.bind((SERVER_HOST, SERVER_PORT))
+                server_socket.listen()
+                signal.signal(
+                    signal.SIGTERM,
+                    lambda signum, frame: handle_sigterm(
+                        server_socket, client_dict, sigterm_received
+                    ),
+                )
+                logging.info("Listening to connections")
+                client_id = 0
+                try:
+                    while True:
+                        try:
+                            client_socket, _ = server_socket.accept()
+
+                            logging.info("A new client has connected")
+                            client_id += 1
+                            client_dict[client_id] = client_socket
+                            processes_pool.apply_async(
+                                handle_client_request,
+                                (client_socket, client_id, client_dict, sigterm_received),
+                                callback=lambda _, connection=client_socket: connection.close(),
+                            )
+                        except socket.error:
+                            if sigterm_received.value == 0:
+                                logging.exception("The connection with the client was lost")
+                                return 1
+                            else:
+                                return 0
+                        except Exception:
+                            logging.exception("Error accepting a client")
+                            return 2
+                finally:
+                    handle_sigterm(server_socket, client_dict, sigterm_received)
+                    processes_pool.close()
+                    processes_pool.join()
     return 0
 
 
