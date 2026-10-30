@@ -3,13 +3,16 @@ import logging
 import signal
 import threading
 
-from common import middleware, message_protocol
+from common import middleware
+from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 
-ID = int(os.environ["ID"])
+ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
-OUTPUT_EXCHAGE = os.environ["OUTPUT_EXCHAGE"]
-FILTER_AVERAGE_PREFIX = os.environ["FILTER_AVERAGE_PREFIX"]
+INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
+OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
+
 AVERAGE_AMOUNT = int(os.environ["AVERAGE_AMOUNT"])
+FILTER_YEAR_AMOUNT = int(os.environ["FILTER_YEAR_AMOUNT"])
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
 YEAR = os.environ.get("YEAR")
 
@@ -18,10 +21,10 @@ class FilterAverage:
 
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, FILTER_AVERAGE_PREFIX, [f"{FILTER_AVERAGE_PREFIX}_{ID}"]
+            MOM_HOST, INPUT_EXCHANGE, [ID]
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ( 
-            MOM_HOST, OUTPUT_EXCHAGE
+            MOM_HOST, OUTPUT_EXCHANGE, []
         )
 
         self.eof_by_client = {}
@@ -35,44 +38,45 @@ class FilterAverage:
     def _process_eof(self, client_id):
         logging.info("Received EOF")
 
-        self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) +1
-
-        if self.eof_by_client[client_id] == 1:
+        self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
+        if self.eof_by_client[client_id] == FILTER_YEAR_AMOUNT: 
             amount_urls, amount_words = self.words_by_client.get(client_id, (0, 0))
             self.average_by_client[client_id] = amount_words / amount_urls if amount_urls > 0 else 0
 
             for url, amount_words in self.pending_messages_by_client.get(client_id, []):
                 self._process_abstract(client_id, url, amount_words)
 
-        elif self.eof_by_client[client_id] == AVERAGE_AMOUNT + 1:
-            self.output_exchange.send_to(message_protocol.internal.serialize([client_id,]), routing_key=client_id) # TODO: Mandar el EOF
+            self.pending_messages_by_client[client_id] = []
+
+        elif self.eof_by_client[client_id] == AVERAGE_AMOUNT + FILTER_YEAR_AMOUNT:
+            self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q5_RESULT), routing_key=client_id) 
 
     def _process_abstract(self, client_id, url, amount_words):
         logging.info("Received abstract")
 
         if self.average_by_client.get(client_id) is None:
             logging.warning(f"Average for client {client_id} not calculated yet")
-            self.pending_messages_by_client[client_id] = self.pending_messages_by_client.get(client_id, [])
-            self.pending_messages_by_client[client_id].append((url, amount_words))
+
+            self.pending_messages_by_client.setdefault(client_id, []).append((url, amount_words))
             return
         
         if amount_words > self.average_by_client[client_id]:
-            message = [client_id, url, amount_words]
-            self.output_exchange.send_to(message_protocol.internal.serialize(message), routing_key=client_id)
+            self.output_exchange.send_to(serialize_msg(MsgType.Q5_RESULT, client_id, url, amount_words), routing_key=client_id)
 
     def process_message(self, message, ack, nack):
         logging.info("Process message")
-        fields = message_protocol.internal.deserialize(message) # TODO: Validar protocolo
-        if len(fields) == 1:
-            self._process_eof(*fields)
+        message_type, client_id, fields = deserialize_msg(message)
+        if message_type == MsgType.WORD_YEAR_AMOUNT:
+            url, date_modified, amount = fields
 
-        elif len(fields) == 4:
-            client_id, key, year, amount = fields
-            if year >= YEAR: # TODO: validar que este bien el >=
-                self.words_by_client[client_id] = self.words_by_client.get(client_id, (0, 0))
-                self.words_by_client[client_id] = (self.words_by_client[client_id][0] + 1, self.words_by_client[client_id][1] + amount)
+            if date_modified >= YEAR: # TODO: validar que este bien el >=
+                url_count, word_count = self.words_by_client.get(client_id, (0, 0))
+                self.words_by_client[client_id] = (url_count + 1, word_count + amount)
             else:
-                self._process_abstract(client_id, key, amount)
+                self._process_abstract(client_id, url, amount)
+
+        if message_type == MsgType.END_OF_RECORDS:
+            self._process_eof(client_id)
 
         else:
             nack()

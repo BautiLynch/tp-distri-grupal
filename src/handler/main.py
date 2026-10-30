@@ -4,32 +4,46 @@ import socket
 import signal
 import multiprocessing
 
-from common import middleware, message_protocol
+from common import middleware
+from common.message_protocol.internal import deserialize_msg, serialize_payload, MsgType as InternalMsgType
+from common.message_protocol.external import serialize_payload, recv_msg, send_msg, MsgType as ExternalMsgType
 
 SERVER_HOST = os.environ["SERVER_HOST"]
 SERVER_PORT = int(os.environ["SERVER_PORT"])
 MOM_HOST = os.environ["MOM_HOST"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 
-QUERY_ID = 1
+QUERY_REPLICAS = {
+    "q1": int(os.environ["QUERY_1_REPLICAS"]),
+    "q2": int(os.environ["QUERY_2_REPLICAS"]),
+    "q3": int(os.environ["QUERY_3_REPLICAS"]),
+    "q4": int(os.environ["QUERY_4_REPLICAS"]),
+    "q5": int(os.environ["QUERY_5_REPLICAS"]),
+}
+if any(amount < 1 for amount in QUERY_REPLICAS.values()):
+    raise ValueError("Every QUERY_<id>_REPLICAS must be greater than zero")
 
 
 class ClientHandler:
     def __init__(self, client_socket):
         self.client_socket = client_socket
         self.input_exchange = None
-        self.query_replicas = int(os.environ.get("QUERY_REPLICAS", "1"))
-        if self.query_replicas < 1:
-            raise ValueError("QUERY_REPLICAS must be greater than zero")
-        self.query_end_count = 0
+        self.query_end_counts = {
+            "q1": 0,
+            "q2": 0,
+            "q3": 0,
+            "q4": 0,
+            "q5": 0,
+        }
+        self.completed_queries = set()
         self.finished = False
         self.stopping = False
 
     def run(self):
-        message_type, client_id = message_protocol.external.recv_msg(
+        message_type, client_id = recv_msg(
             self.client_socket
         )
-        if message_type != message_protocol.external.MsgType.CLIENT_ID:
+        if message_type != ExternalMsgType.CLIENT_ID:
             raise ValueError("Expected a client ID to register the connection")
         if self.stopping:
             return
@@ -44,32 +58,35 @@ class ClientHandler:
         if self.stopping:
             return
 
-        message_protocol.external.send_msg(
+        send_msg(
             self.client_socket,
-            message_protocol.external.MsgType.ACK,
+            ExternalMsgType.ACK,
         )
         self.input_exchange.start_consuming(self.handle_result)
 
     def handle_result(self, message, ack, nack):
         try:
-            message_type, _, query_id, payload = (
-                message_protocol.internal.deserialize_result(message)
+            message_type, _, fields = (
+                deserialize_msg(message)
             )
-            if query_id != QUERY_ID:
-                raise ValueError(f"Unexpected query id: {query_id}")
-
-            if message_type == message_protocol.internal.MsgType.RESULT:
-                message_protocol.external.send_all(self.client_socket, payload)
-            elif message_type == message_protocol.internal.MsgType.QUERY_END:
-                self.query_end_count += 1
-                if not self.finished and self.query_end_count >= self.query_replicas:
-                    self.finished = True
-                    message_protocol.external.send_msg(
+            if message_type == InternalMsgType.QUERY_END:
+                query_id = serialize_payload(message_type, *fields)
+                query_name = f"q{query_id}"
+                self.query_end_counts[query_name] += 1
+                if self.query_end_counts[query_name] == QUERY_REPLICAS[query_name]:
+                    self.completed_queries.add(query_name)
+                self.finished = len(self.completed_queries) == len(QUERY_REPLICAS)
+                if self.finished:
+                    send_msg(
                         self.client_socket,
-                        message_protocol.external.MsgType.END_OF_RECORDS,
+                        ExternalMsgType.END_OF_RECORDS,
                     )
             else:
-                raise ValueError("Unknown internal message type")
+                payload = serialize_payload(message_type, *fields)
+                send_msg(
+                    self.client_socket, ExternalMsgType.RESULT, message_type,
+                    payload,
+                )
         except Exception:
             nack()
             raise

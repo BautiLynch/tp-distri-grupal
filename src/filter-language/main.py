@@ -3,25 +3,29 @@ import logging
 import signal
 import threading
 
-from common import middleware, message_protocol
+from common import middleware
+from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 
-ID = int(os.environ["ID"])
+ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
-OUTPUT_EXCHAGE = os.environ["OUTPUT_EXCHAGE"]
-FILTER_LANGUAGE_PREFIX = os.environ["FILTER_LANGUAGE_PREFIX"]
+INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
+OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
 YEAR = os.environ.get("YEAR")
+SPLITTER_AMOUNT = int(os.environ["SPLITTER_AMOUNT"])
 
 
 class FilterLanguage:
 
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, FILTER_LANGUAGE_PREFIX, [f"{FILTER_LANGUAGE_PREFIX}_{ID}"]
+            MOM_HOST, INPUT_EXCHANGE, [ID]
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ( 
-            MOM_HOST, OUTPUT_EXCHAGE
+            MOM_HOST, OUTPUT_EXCHANGE, []
         )
+
+        self.eof_by_client = {}
 
         self.words_by_client = {}
         self.end_event = threading.Event()
@@ -29,13 +33,10 @@ class FilterLanguage:
 
     def process_message(self, message, ack, nack):
         logging.info("Process message")
-        fields = message_protocol.internal.deserialize(message) # TODO: Validar protocolo
-        if len(fields) == 1:
-            logging.info("Received EOF")
-            self.output_exchange.send_to(message, routing_key=fields[0]) 
 
-        elif len(fields) == 3:
-            client_id, word, language = fields
+        message_type, client_id, fields = deserialize_msg(message)
+        if message_type == MsgType.WORD_LANGUAGE:
+            word, language = fields
 
             word_sent = self.words_by_client.get(client_id, {})
             language_sent = word_sent.get(word, set())
@@ -50,7 +51,14 @@ class FilterLanguage:
 
                 if len(language_sent) == 2:
                     logging.info("Received word in both languages")
-                    self.output_exchange.send_to([client_id, word], routing_key=client_id) 
+                    self.output_exchange.send_to(serialize_msg(MsgType.Q3_RESULT, client_id, word), routing_key=client_id) 
+
+        if message_type == MsgType.END_OF_RECORDS:
+            logging.info("Received EOF")
+
+            self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
+            if self.eof_by_client[client_id] == SPLITTER_AMOUNT:
+                self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q3_RESULT), routing_key=client_id) 
 
         else:
             nack()

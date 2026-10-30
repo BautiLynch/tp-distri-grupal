@@ -1,12 +1,15 @@
-class MsgType:
-    ARTICLE = 1
-    CLIENT_ID = 2
-    ACK = 3
-    END_OF_RECORDS = 4
+from enum import IntEnum, auto
 
+
+class MsgType(IntEnum):
+    ARTICLE = 1
+    CLIENT_ID = auto()
+    ACK = auto()
+    END_OF_RECORDS = auto()
+    HANDLER_ADDRESS = auto()
+    RESULT = auto()
 
 UINT32_SIZE = 4
-
 
 def recv_all(connection, size):
     data = bytearray()
@@ -70,27 +73,35 @@ def _serialize_text(value):
     return _serialize_bytes(value.encode("utf-8"))
 
 
-def _recv_article(connection):
-    field_count = _recv_uint32(connection)
-    article = {}
-    for _ in range(field_count):
-        name = _recv_text(connection)
-        value = _recv_text(connection)
-        if name in article:
-            raise ValueError("Repeated article field")
-        article[name] = value
-    return article
+def _recv_handler_address(connection):
+    host = _recv_text(connection)
+    port = _recv_uint32(connection)
+    _validate_address(host, port)
+    return host, port
 
 
-def _serialize_article(article):
-    if not isinstance(article, dict):
-        raise ValueError("An article must be a dictionary")
-    fields = [_serialize_uint32(len(article))]
-    for name, value in article.items():
-        if not isinstance(name, str) or not isinstance(value, str):
-            raise ValueError("Article field names and values must be strings")
-        fields.extend((_serialize_text(name), _serialize_text(value)))
-    return b"".join(fields)
+def _validate_address(host, port):
+    if not isinstance(host, str) or not host.strip():
+        raise ValueError("Handler host must not be empty")
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError("Handler port must be between 1 and 65535")
+
+
+def _serialize_handler_address(host, port):
+    _validate_address(host, port)
+    return _serialize_text(host) + _serialize_uint32(port)
+
+def _recv_result(connection):
+    query_id = _recv_uint32(connection)
+    if query_id == 0:
+        raise ValueError("Query ID must be positive")
+    return query_id, _recv_bytes(connection)
+
+
+def _serialize_result(query_id, payload):
+    if type(query_id) is not int or query_id <= 0:
+        raise ValueError("Query ID must be positive")
+    return _serialize_uint32(query_id) + _serialize_bytes(payload)
 
 
 def _recv_empty(connection):
@@ -102,17 +113,21 @@ def _serialize_empty():
 
 
 RECV_MSG_HANDLERS = {
-    MsgType.ARTICLE: _recv_article,
+    MsgType.ARTICLE: _recv_bytes,
     MsgType.CLIENT_ID: _recv_client_id,
     MsgType.ACK: _recv_empty,
     MsgType.END_OF_RECORDS: _recv_empty,
+    MsgType.HANDLER_ADDRESS: _recv_handler_address,
+    MsgType.RESULT: _recv_result,
 }
 
 SEND_MSG_HANDLERS = {
-    MsgType.ARTICLE: _serialize_article,
+    MsgType.ARTICLE: _serialize_bytes,
     MsgType.CLIENT_ID: _serialize_client_id,
     MsgType.ACK: _serialize_empty,
     MsgType.END_OF_RECORDS: _serialize_empty,
+    MsgType.HANDLER_ADDRESS: _serialize_handler_address,
+    MsgType.RESULT: _serialize_result,
 }
 
 

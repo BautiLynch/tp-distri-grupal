@@ -1,62 +1,44 @@
-import os
-import logging
-import socket
-import signal
+﻿import logging
 import multiprocessing
+import os
+import signal
+import socket
+
 from common import middleware, message_protocol
+from common.hashing.hashing import routing_key, routing_keys
+
+from helpers import preprocess_article, parse_article
 
 SERVER_HOST = os.environ["SERVER_HOST"]
 SERVER_PORT = int(os.environ["SERVER_PORT"])
 MOM_HOST = os.environ["MOM_HOST"]
 FILTER_PREFIX = os.environ["FILTER_PREFIX"]
 FILTER_AMOUNT = int(os.environ["FILTER_AMOUNT"])
-SPLITTER_QUEUE = os.environ["SPLITTER_QUEUE"]
+SPLITTER_PREFIX = os.environ["SPLITTER_PREFIX"]
+SPLITTER_AMOUNT = int(os.environ["SPLITTER_AMOUNT"])
+HANDLER_HOST = os.environ["HANDLER_HOST"]
+HANDLER_PORT = int(os.environ["HANDLER_PORT"])
 
 if FILTER_AMOUNT < 1:
     raise ValueError("FILTER_AMOUNT must be greater than zero")
 
-FILTER_FIELDS = (
-    "date_modified",
-    "image",
-    "in_language",
-    "language",
-    "modification_date",
-    "name",
-    "sections",
-    "url",
-)
-SPLITTER_FIELDS = ("abstract", "date_modified", "in_language", "name", "sections", "url")
-
-
-def filter_article_fields(article, fields):
-    filtered_article = {}
-    for name, value in article.items():
-        if name in fields:
-            filtered_article[name] = value
-    return filtered_article
-
-
-def filter_routing_key(index):
-    return f"{FILTER_PREFIX}_{index % FILTER_AMOUNT}"
-
-
-def filter_routing_keys():
-    return [f"{FILTER_PREFIX}_{index}" for index in range(FILTER_AMOUNT)]
-
-
 def handle_client_request(client_socket, client_id, client_dict, sigterm_received):
     filter_exchange = None
-    splitter_queue = None
+    splitter_exchange = None
     article_index = 0
     try:
         message_protocol.external.send_msg(
             client_socket, message_protocol.external.MsgType.CLIENT_ID, client_id
         )
-        filter_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, FILTER_PREFIX, []
+        message_protocol.external.send_msg(
+            client_socket, message_protocol.external.MsgType.HANDLER_ADDRESS,
+            HANDLER_HOST, HANDLER_PORT,
         )
-        splitter_queue = middleware.MessageMiddlewareQueueRabbitMQ(
-            MOM_HOST, SPLITTER_QUEUE
+        filter_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, FILTER_PREFIX, [f"{index}" for index in range(FILTER_AMOUNT)]
+        )
+        splitter_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, SPLITTER_PREFIX, [f"{index}" for index in range(SPLITTER_AMOUNT)]
         )
         while True:
             message_type, article = message_protocol.external.recv_msg(client_socket)
@@ -66,39 +48,39 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
             ):
                 raise ValueError("Expected an article or end of records")
             if message_type == message_protocol.external.MsgType.ARTICLE:
-                filter_exchange.send_to(
-                    message_protocol.internal.serialize_article(
-                        client_id,
-                        filter_article_fields(article, FILTER_FIELDS),
-                    ),
-                    filter_routing_key(article_index),
+                filtered_article, splitter_article = preprocess_article(parse_article(article))
+                filtered = message_protocol.internal.serialize_msg(
+                    message_protocol.internal.MsgType.FILTER_ARTICLE,
+                    client_id, *filtered_article,
                 )
+                split = message_protocol.internal.serialize_msg(
+                    message_protocol.internal.MsgType.SPLITTER_ARTICLE,
+                    client_id, *splitter_article,
+                )
+                filter_exchange.send_to(filtered, routing_key(FILTER_PREFIX, article_index, FILTER_AMOUNT))
+                splitter_exchange.send_to(split, routing_key(SPLITTER_PREFIX, article_index, SPLITTER_AMOUNT))
                 article_index += 1
-                splitter_queue.send(
-                    message_protocol.internal.serialize_article(
-                        client_id,
-                        filter_article_fields(article, SPLITTER_FIELDS),
-                    )
-                )
             else:
-                end_of_records = message_protocol.internal.serialize_end_of_records(
-                    client_id
+                end_of_records = message_protocol.internal.serialize_msg(
+                    message_protocol.internal.MsgType.END_OF_RECORDS,
+                    client_id,
                 )
-                for routing_key in filter_routing_keys():
-                    filter_exchange.send_to(end_of_records, routing_key)
-                splitter_queue.send(end_of_records)
+                filter_exchange.send(end_of_records)
+                splitter_exchange.send(end_of_records)
+                    
             message_protocol.external.send_msg(
-                client_socket, message_protocol.external.MsgType.ACK
+                client_socket, message_protocol.external.MsgType.ACK # TODO: Esta bien que el cliente necesite un ACK? 
             )
             if message_type == message_protocol.external.MsgType.END_OF_RECORDS:
                 break
+
     except (socket.error, EOFError) as e:
         if not sigterm_received.value:
             logging.error("Client %s disconnected: %s", client_id, e)
     except Exception as e:
         logging.error("Client %s: %s", client_id, e)
     finally:
-        for mom in (filter_exchange, splitter_queue):
+        for mom in (filter_exchange, splitter_exchange):
             if mom is not None:
                 try:
                     mom.close()
