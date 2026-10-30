@@ -2,7 +2,9 @@ FROM python:3-alpine
 
 RUN pip3 install pika
 
-COPY common ./common
-COPY filter .
+WORKDIR /app
 
-ENTRYPOINT ["python3", "main.py"]
+COPY common ./common
+COPY filter ./filter
+
+ENTRYPOINT ["python3", "-m", "filter.main"]

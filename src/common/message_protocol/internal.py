@@ -43,7 +43,7 @@ def serialize_result_bytes(client_id, query_id, payload):
 
 
 def serialize_query_end(client_id, query_id):
-    """The whole query has finished, including every replica and its results."""
+    """A filter replica has finished emitting results for a query."""
     return _serialize(MsgType.QUERY_END, client_id, query_id, b"")
 
 
