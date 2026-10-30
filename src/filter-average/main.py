@@ -9,6 +9,7 @@ ID = int(os.environ["ID"])
 MOM_HOST = os.environ["MOM_HOST"]
 OUTPUT_EXCHAGE = os.environ["OUTPUT_EXCHAGE"]
 FILTER_AVERAGE_PREFIX = os.environ["FILTER_AVERAGE_PREFIX"]
+AVERAGE_AMOUNT = int(os.environ["AVERAGE_AMOUNT"])
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
 YEAR = os.environ.get("YEAR")
 
@@ -23,6 +24,7 @@ class FilterAverage:
             MOM_HOST, OUTPUT_EXCHAGE
         )
 
+        self.eof_by_client = {}
         self.average_by_client = {}
         self.words_by_client = {}
         self.end_event = threading.Event()
@@ -31,8 +33,14 @@ class FilterAverage:
     def _process_eof(self, client_id):
         logging.info("Received EOF")
 
-        amount_urls, amount_words = self.words_by_client.get(client_id, (0, 0))
-        self.average_by_client[client_id] = amount_words / amount_urls if amount_urls > 0 else 0
+        self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) +1
+
+        if self.eof_by_client[client_id] == 1:
+            amount_urls, amount_words = self.words_by_client.get(client_id, (0, 0))
+            self.average_by_client[client_id] = amount_words / amount_urls if amount_urls > 0 else 0
+
+        elif self.eof_by_client[client_id] == AVERAGE_AMOUNT + 1:
+            self.output_exchange.send_to(message_protocol.internal.serialize([client_id,]), routing_key=client_id) # TODO: Mandar el EOF
 
     def _process_abstract(self, client_id, url, amount_words):
         logging.info("Received abstract")

@@ -41,6 +41,7 @@ class Average:
             key = hashing.get_hash_key(f"{client_id}_{word}", FILTER_AVERAGE_AMOUNT)
             self.output_exchange.send_to(message_protocol.internal.serialize([client_id, word, amount, YEAR]), routing_key=key)
 
+        self.output_exchange.send(message_protocol.internal.serialize([client_id])) # TODO: Mandar el EOF
         self.urls_by_client[client_id] = {}
         
 
