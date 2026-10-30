@@ -44,7 +44,7 @@ class AggregationFilter:
         self.words_by_client[client_id] = {}
 
         message = [client_id, top_parcial]
-        self.output_queue.send(message_protocol.internal.serialize(message))
+        self.output_queue.send_to(message_protocol.internal.serialize(message), routing_key=client_id)
         
 
     def process_message(self, message, ack, nack):

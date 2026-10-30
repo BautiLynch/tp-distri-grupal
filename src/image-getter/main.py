@@ -35,7 +35,7 @@ class ImageGetter:
             self._get_image(*fields)
         elif len(fields) == 1:
             logging.info("Received EOF")
-            self.output_exchange.send(message)
+            self.output_exchange.send_to(message, routing_key=fields[0])
         else:
             nack()
             return

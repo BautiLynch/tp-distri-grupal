@@ -57,6 +57,9 @@ class JoinFilter:
         fields = message_protocol.internal.deserialize(message) # TODO: Validar el protocolo
         if len(fields) == 2:
             self._process_data(*fields)
+        elif len(fields) == 1:
+            logging.info("Received EOF")
+            self.output_exchange.send_to(message, routing_key=fields[0])
         else:
             nack()
             return
