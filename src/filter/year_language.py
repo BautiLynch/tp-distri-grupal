@@ -1,11 +1,11 @@
 """Entidad filter de la query 1: idioma y anio de modificacion.
 
 Entrada por RabbitMQ (protocolo interno binario):
-    ARTICLE: articulo como diccionario con url, fecha de modificacion e idioma.
+    FILTER_ARTICLE: tupla con campos binarios en un orden fijo.
     END_OF_RECORDS: fin del stream de un cliente.
 
 Salida al Handler:
-    RESULT con un payload external ARTICLE: {"url": ..., "date_modified": ...}
+    Q1_RESULT con URL y fecha de modificacion en formato binario.
     QUERY_END cuando esta instancia termina de procesar la query para el cliente.
 """
 
@@ -83,10 +83,10 @@ class YearLanguageFilter:
 
     def process_message(self, message, ack, nack):
         try:
-            message_type, client_id, article = (
-                message_protocol.internal.deserialize_input(message)
+            message_type, client_id, _, article = (
+                message_protocol.internal.deserialize_msg(message)
             )
-            if message_type == message_protocol.internal.MsgType.ARTICLE:
+            if message_type == message_protocol.internal.MsgType.FILTER_ARTICLE:
                 self._filter(client_id, article)
             elif message_type == message_protocol.internal.MsgType.END_OF_RECORDS:
                 logging.info("Received EOF for client %s", client_id)
@@ -101,24 +101,12 @@ class YearLanguageFilter:
         ack()
 
     def _filter(self, client_id, article):
-        if not isinstance(article, dict):
-            raise ValueError("ARTICLE payload must be a dictionary")
-
-        url = article.get("url")
+        _, url, language, modification_date, _, _ = article
         if not url:
             raise ValueError("ARTICLE is missing url")
 
-        language = article.get("language") or article.get("in_language")
-        if language is None:
-            raise ValueError("ARTICLE is missing language")
-        if str(language).strip().lower() not in self.languages:
+        if language.strip().lower() not in self.languages:
             return
-
-        modification_date = article.get("modification_date")
-        if modification_date is None:
-            modification_date = article.get("date_modified")
-        if modification_date is None:
-            raise ValueError("ARTICLE is missing modification date")
 
         modification_year = _year(modification_date)
         if modification_year is None:
@@ -131,23 +119,18 @@ class YearLanguageFilter:
         if modification_year > self.max_year:
             return
 
-        self._send_result(
-            client_id,
-            {"url": url, "date_modified": modification_date},
-        )
+        self._send_result(client_id, url, modification_date)
 
-    def _send_result(self, client_id, result):
-        message = message_protocol.internal.serialize_result(
-            client_id,
-            QUERY_ID,
-            message_protocol.external.MsgType.ARTICLE,
-            result,
+    def _send_result(self, client_id, url, date_modified):
+        message = message_protocol.internal.serialize_msg(
+            message_protocol.internal.MsgType.Q1_RESULT,
+            client_id, QUERY_ID, url, date_modified,
         )
         self.output_exchange.send_rk(message, str(client_id))
 
     def _finish(self, client_id):
-        message = message_protocol.internal.serialize_query_end(
-            client_id, QUERY_ID
+        message = message_protocol.internal.serialize_msg(
+            message_protocol.internal.MsgType.QUERY_END, client_id, QUERY_ID,
         )
         self.output_exchange.send_rk(message, str(client_id))
 

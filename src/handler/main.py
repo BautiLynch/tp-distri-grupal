@@ -12,8 +12,11 @@ MOM_HOST = os.environ["MOM_HOST"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 
 QUERY_REPLICAS = {
-    query_id: int(os.environ[f"QUERY_{query_id}_REPLICAS"])
-    for query_id in range(1, message_protocol.internal.QUERY_COUNT + 1)
+    "q1": int(os.environ["QUERY_1_REPLICAS"]),
+    "q2": int(os.environ["QUERY_2_REPLICAS"]),
+    "q3": int(os.environ["QUERY_3_REPLICAS"]),
+    "q4": int(os.environ["QUERY_4_REPLICAS"]),
+    "q5": int(os.environ["QUERY_5_REPLICAS"]),
 }
 if any(amount < 1 for amount in QUERY_REPLICAS.values()):
     raise ValueError("Every QUERY_<id>_REPLICAS must be greater than zero")
@@ -23,7 +26,13 @@ class ClientHandler:
     def __init__(self, client_socket):
         self.client_socket = client_socket
         self.input_exchange = None
-        self.query_end_counts = {query_id: 0 for query_id in QUERY_REPLICAS}
+        self.query_end_counts = {
+            "q1": 0,
+            "q2": 0,
+            "q3": 0,
+            "q4": 0,
+            "q5": 0,
+        }
         self.completed_queries = set()
         self.finished = False
         self.stopping = False
@@ -55,22 +64,26 @@ class ClientHandler:
 
     def handle_result(self, message, ack, nack):
         try:
-            message_type, _, query_id, payload = (
-                message_protocol.internal.deserialize_result(message)
+            message_type, _, query_id, fields = (
+                message_protocol.internal.deserialize_msg(message)
             )
-            if query_id not in self.query_end_counts:
+            query_name = f"q{query_id}"
+            if query_name not in self.query_end_counts:
                 raise ValueError(f"Unexpected query id: {query_id}")
-            if query_id in self.completed_queries:
+            if query_name in self.completed_queries:
                 raise ValueError("Message received after query completion")
-            if message_type == message_protocol.internal.MsgType.RESULT:
+            if message_type == message_protocol.internal.MsgType.Q1_RESULT:
+                if query_id != 1:
+                    raise ValueError("Q1_RESULT must belong to query 1")
+                payload = message_protocol.internal.serialize_payload(message_type, *fields)
                 message_protocol.external.send_msg(
                     self.client_socket, message_protocol.external.MsgType.RESULT,
                     query_id, payload,
                 )
             elif message_type == message_protocol.internal.MsgType.QUERY_END:
-                self.query_end_counts[query_id] += 1
-                if self.query_end_counts[query_id] == QUERY_REPLICAS[query_id]:
-                    self.completed_queries.add(query_id)
+                self.query_end_counts[query_name] += 1
+                if self.query_end_counts[query_name] == QUERY_REPLICAS[query_name]:
+                    self.completed_queries.add(query_name)
                 self.finished = len(self.completed_queries) == len(QUERY_REPLICAS)
                 if self.finished:
                     message_protocol.external.send_msg(

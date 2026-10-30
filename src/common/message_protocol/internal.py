@@ -1,13 +1,10 @@
-import json
-
-from . import external
-
-
 class MsgType:
-    RESULT = 1
+    Q1_RESULT = 1
     QUERY_END = 2
-    ARTICLE = 3
+    FILTER_ARTICLE = 3
     END_OF_RECORDS = 4
+    WORD = 5
+    SPLITTER_ARTICLE = 6
 
 
 QUERY_COUNT = 5
@@ -30,23 +27,6 @@ def _serialize(message_type, client_id, query_id, payload):
     )
 
 
-def serialize_result(client_id, query_id, external_type, *fields):
-    message = external.serialize_msg(external_type, *fields)
-    return serialize_result_bytes(client_id, query_id, message)
-
-
-def serialize_result_bytes(client_id, query_id, payload):
-    """Keep the query's payload opaque; the handler adds its external envelope."""
-    if not isinstance(payload, bytes):
-        raise ValueError("Result payload must be bytes")
-    return _serialize(MsgType.RESULT, client_id, query_id, payload)
-
-
-def serialize_query_end(client_id, query_id):
-    """A filter replica has finished emitting results for a query."""
-    return _serialize(MsgType.QUERY_END, client_id, query_id, b"")
-
-
 def _deserialize(message):
     if len(message) < HEADER_SIZE:
         raise ValueError("Incomplete internal header")
@@ -60,23 +40,37 @@ def _deserialize(message):
     return message_type, client_id, query_id, payload
 
 
-def deserialize_result(message):
-    return _deserialize(message)
+def _serialize_texts(fields):
+    parts = []
+    for value in fields:
+        if not isinstance(value, str):
+            raise ValueError("Record fields must be strings")
+        encoded = value.encode("utf-8")
+        parts.extend((len(encoded).to_bytes(UINT32_SIZE, "big"), encoded))
+    return b"".join(parts)
 
 
-def serialize_article(client_id, article):
-    if not isinstance(article, dict):
-        raise ValueError("An article must be a dictionary")
-    fields = {
-        name: json.dumps(value, ensure_ascii=False, allow_nan=False)
-        for name, value in article.items()
-    }
-    payload = external._serialize_article(fields)
-    return _serialize(MsgType.ARTICLE, client_id, INPUT_QUERY_ID, payload)
+def _serialize_filter_article(name, url, language, date_modified, image_url, sections):
+    payload = _serialize_texts((name, url, language, date_modified, image_url))
+    payload += len(sections).to_bytes(UINT32_SIZE, "big")
+    return payload + _serialize_texts(sections)
 
 
-def serialize_end_of_records(client_id):
-    return _serialize(MsgType.END_OF_RECORDS, client_id, INPUT_QUERY_ID, b"")
+def _serialize_splitter_article(url, language, date_modified, abstract):
+    return _serialize_texts((url, language, date_modified, abstract))
+
+
+def _serialize_word(url, language, date_modified, word, amount):
+    payload = _serialize_texts((url, language, date_modified, word))
+    return payload + amount.to_bytes(UINT32_SIZE, "big")
+
+
+def _serialize_query1_result(url, date_modified):
+    return _serialize_texts((url, date_modified))
+
+
+def _serialize_empty():
+    return b""
 
 
 def _deserialize_text(payload, offset):
@@ -91,23 +85,95 @@ def _deserialize_text(payload, offset):
     return value, value_end
 
 
-def deserialize_input(message):
-    message_type, client_id, _, payload = _deserialize(message)
-    if message_type == MsgType.END_OF_RECORDS:
-        return message_type, client_id, None
-    if message_type != MsgType.ARTICLE:
-        raise ValueError("Unknown internal input type")
-    if len(payload) < UINT32_SIZE:
-        raise ValueError("Incomplete article field count")
-    field_count = int.from_bytes(payload[:UINT32_SIZE], byteorder="big")
-    offset = UINT32_SIZE
-    article = {}
-    for _ in range(field_count):
-        name, offset = _deserialize_text(payload, offset)
+def _deserialize_texts(payload, count, offset=0):
+    fields = []
+    for _ in range(count):
         value, offset = _deserialize_text(payload, offset)
-        if name in article:
-            raise ValueError("Repeated article field")
-        article[name] = json.loads(value)
+        fields.append(value)
+    return tuple(fields), offset
+
+
+def _deserialize_uint32(payload, offset):
+    end = offset + UINT32_SIZE
+    if end > len(payload):
+        raise ValueError("Incomplete record integer")
+    return int.from_bytes(payload[offset:end], "big"), end
+
+
+def _check_end(payload, offset):
     if offset != len(payload):
-        raise ValueError("Unexpected bytes after the article")
-    return message_type, client_id, article
+        raise ValueError("Unexpected bytes after record")
+
+
+def _deserialize_filter_article(payload):
+    fields, offset = _deserialize_texts(payload, 5)
+    section_count, offset = _deserialize_uint32(payload, offset)
+    sections, offset = _deserialize_texts(payload, section_count, offset)
+    _check_end(payload, offset)
+    return fields + (sections,)
+
+
+def _deserialize_splitter_article(payload):
+    fields, offset = _deserialize_texts(payload, 4)
+    _check_end(payload, offset)
+    return fields
+
+
+def _deserialize_word(payload):
+    fields, offset = _deserialize_texts(payload, 4)
+    amount, offset = _deserialize_uint32(payload, offset)
+    _check_end(payload, offset)
+    return fields + (amount,)
+
+
+def _deserialize_query1_result(payload):
+    fields, offset = _deserialize_texts(payload, 2)
+    _check_end(payload, offset)
+    return fields
+
+
+def _deserialize_empty(payload):
+    _check_end(payload, 0)
+    return ()
+
+
+RECV_MSG_HANDLERS = {
+    MsgType.FILTER_ARTICLE: _deserialize_filter_article,
+    MsgType.SPLITTER_ARTICLE: _deserialize_splitter_article,
+    MsgType.WORD: _deserialize_word,
+    MsgType.Q1_RESULT: _deserialize_query1_result,
+    MsgType.END_OF_RECORDS: _deserialize_empty,
+    MsgType.QUERY_END: _deserialize_empty,
+}
+
+SEND_MSG_HANDLERS = {
+    MsgType.FILTER_ARTICLE: _serialize_filter_article,
+    MsgType.SPLITTER_ARTICLE: _serialize_splitter_article,
+    MsgType.WORD: _serialize_word,
+    MsgType.Q1_RESULT: _serialize_query1_result,
+    MsgType.END_OF_RECORDS: _serialize_empty,
+    MsgType.QUERY_END: _serialize_empty,
+}
+
+
+def serialize_payload(message_type, *fields):
+    if message_type not in SEND_MSG_HANDLERS:
+        raise ValueError("Unknown internal message type")
+    return SEND_MSG_HANDLERS[message_type](*fields)
+
+
+def deserialize_payload(message_type, payload):
+    if message_type not in RECV_MSG_HANDLERS:
+        raise ValueError("Unknown internal message type")
+    return RECV_MSG_HANDLERS[message_type](payload)
+
+
+def serialize_msg(message_type, client_id, query_id, *fields):
+    payload = serialize_payload(message_type, *fields)
+    return _serialize(message_type, client_id, query_id, payload)
+
+
+def deserialize_msg(message):
+    message_type, client_id, query_id, payload = _deserialize(message)
+    fields = deserialize_payload(message_type, payload)
+    return message_type, client_id, query_id, fields

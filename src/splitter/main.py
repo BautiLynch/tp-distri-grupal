@@ -33,7 +33,8 @@ class Splitter:
 
         return set(stopwords_list)
 
-    def _split_and_send(self, client_id, title, url, language, date, abstract):
+    def _split_and_send(self, client_id, article):
+        url, language, date_modified, abstract = article
         words = abstract.split(" ")
         for word in words:
             if self._is_stopword(word, language):
@@ -42,8 +43,12 @@ class Splitter:
             self.word_count[word] = self.word_count.get(word, 0) + 1
 
         for word, amount in self.word_count.items():
-            message = [client_id, title, url, language, date, word, amount]
-            self.output_queue.send(message_protocol.internal.serialize(message))
+            message = message_protocol.internal.serialize_msg(
+                message_protocol.internal.MsgType.WORD,
+                client_id, message_protocol.internal.INPUT_QUERY_ID,
+                url, language, date_modified, word, amount,
+            )
+            self.output_queue.send(message)
 
     def _is_stopword(self, word, language):
         if language == "en":
@@ -55,13 +60,20 @@ class Splitter:
 
     def process_message(self, message, ack, nack):
         logging.info("Process message")
-        fields = message_protocol.internal.deserialize(message) # TODO: Validar protocolo
-        if len(fields) == 6:
-            self._split_and_send(*fields)
-        elif len(fields) == 1:
-            logging.info("Received EOF")
-            self.output_queue.send(message)
-        else:
+        try:
+            message_type, client_id, _, article = message_protocol.internal.deserialize_msg(message)
+            if message_type == message_protocol.internal.MsgType.SPLITTER_ARTICLE:
+                self._split_and_send(client_id, article)
+            elif message_type == message_protocol.internal.MsgType.END_OF_RECORDS:
+                logging.info("Received EOF")
+                self.output_queue.send(message_protocol.internal.serialize_msg(
+                    message_protocol.internal.MsgType.END_OF_RECORDS,
+                    client_id, message_protocol.internal.INPUT_QUERY_ID,
+                ))
+            else:
+                raise ValueError(f"Unexpected splitter message type: {message_type}")
+        except Exception:
+            logging.exception("Could not process splitter input")
             nack()
             return
         ack()

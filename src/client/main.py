@@ -98,7 +98,7 @@ class Client:
     def _send_records(self, connection, source):
         for line in source:
             self._check_stopping()
-            external.send_msg(connection, external.MsgType.ARTICLE_LINE, line)
+            external.send_msg(connection, external.MsgType.ARTICLE, line)
             expect_message(connection, external.MsgType.ACK)
         self._check_stopping()
         external.send_msg(connection, external.MsgType.END_OF_RECORDS)

@@ -3,7 +3,6 @@ class MsgType:
     CLIENT_ID = 2
     ACK = 3
     END_OF_RECORDS = 4
-    ARTICLE_LINE = 5
     HANDLER_ADDRESS = 6
     RESULT = 7
 
@@ -105,29 +104,6 @@ def _serialize_result(query_id, payload):
     return _serialize_uint32(query_id) + _serialize_bytes(payload)
 
 
-def _recv_article(connection):
-    field_count = _recv_uint32(connection)
-    article = {}
-    for _ in range(field_count):
-        name = _recv_text(connection)
-        value = _recv_text(connection)
-        if name in article:
-            raise ValueError("Repeated article field")
-        article[name] = value
-    return article
-
-
-def _serialize_article(article):
-    if not isinstance(article, dict):
-        raise ValueError("An article must be a dictionary")
-    fields = [_serialize_uint32(len(article))]
-    for name, value in article.items():
-        if not isinstance(name, str) or not isinstance(value, str):
-            raise ValueError("Article field names and values must be strings")
-        fields.extend((_serialize_text(name), _serialize_text(value)))
-    return b"".join(fields)
-
-
 def _recv_empty(connection):
     return None
 
@@ -137,21 +113,19 @@ def _serialize_empty():
 
 
 RECV_MSG_HANDLERS = {
-    MsgType.ARTICLE: _recv_article,
+    MsgType.ARTICLE: _recv_bytes,
     MsgType.CLIENT_ID: _recv_client_id,
     MsgType.ACK: _recv_empty,
     MsgType.END_OF_RECORDS: _recv_empty,
-    MsgType.ARTICLE_LINE: _recv_bytes,
     MsgType.HANDLER_ADDRESS: _recv_handler_address,
     MsgType.RESULT: _recv_result,
 }
 
 SEND_MSG_HANDLERS = {
-    MsgType.ARTICLE: _serialize_article,
+    MsgType.ARTICLE: _serialize_bytes,
     MsgType.CLIENT_ID: _serialize_client_id,
     MsgType.ACK: _serialize_empty,
     MsgType.END_OF_RECORDS: _serialize_empty,
-    MsgType.ARTICLE_LINE: _serialize_bytes,
     MsgType.HANDLER_ADDRESS: _serialize_handler_address,
     MsgType.RESULT: _serialize_result,
 }

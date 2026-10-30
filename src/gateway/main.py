@@ -19,32 +19,68 @@ HANDLER_PORT = int(os.environ["HANDLER_PORT"])
 if FILTER_AMOUNT < 1:
     raise ValueError("FILTER_AMOUNT must be greater than zero")
 
-FILTER_FIELDS = (
-    "date_modified",
-    "image",
-    "in_language",
-    "language",
-    "modification_date",
-    "name",
-    "sections",
-    "url",
-)
-SPLITTER_FIELDS = ("abstract", "date_modified", "in_language", "name", "sections", "url")
 
-
-def filter_article_fields(article, fields):
-    filtered_article = {}
-    for name, value in article.items():
-        if name in fields:
-            filtered_article[name] = value
-    return filtered_article
-
-
-def parse_article_line(line):
-    article = json.loads(line.decode("utf-8"))
+def parse_article(payload):
+    article = json.loads(payload.decode("utf-8"))
     if not isinstance(article, dict):
-        raise ValueError("Each dataset line must contain a JSON object")
+        raise ValueError("ARTICLE must contain a JSON object")
     return article
+
+
+def article_text(article, field, default=None):
+    value = article.get(field)
+    if value is None:
+        value = default
+    if not isinstance(value, str):
+        raise ValueError(f"Article field {field} must be text")
+    return value
+
+
+def section_names(sections):
+    if sections is None:
+        return ()
+    if not isinstance(sections, list):
+        raise ValueError("Article sections must be a list")
+    names = []
+    _collect_section_names(sections, names)
+    return tuple(names)
+
+
+def _collect_section_names(sections, names):
+    for section in sections:
+        if not isinstance(section, dict):
+            raise ValueError("Article section must be an object")
+        if section.get("type") != "section":
+            continue
+        name = section.get("name")
+        if name is not None:
+            names.append(article_text(section, "name"))
+        parts = section.get("has_parts") or []
+        if not isinstance(parts, list):
+            raise ValueError("Section has_parts must be a list")
+        _collect_section_names(parts, names)
+
+
+def preprocess_article(article):
+    name = article_text(article, "name")
+    url = article_text(article, "url")
+    date_modified = article_text(article, "date_modified")
+    language = article.get("in_language")
+    if not isinstance(language, dict):
+        raise ValueError("Article in_language must contain an identifier")
+    language = article_text(language, "identifier")
+    image = article.get("image")
+    if image is not None and not isinstance(image, dict):
+        raise ValueError("Article image must be an object")
+    image_url = article_text(image or {}, "content_url", "")
+    filtered = (
+        name, url, language, date_modified, image_url,
+        section_names(article.get("sections")),
+    )
+    split = (
+        url, language, date_modified, article_text(article, "abstract", ""),
+    )
+    return filtered, split
 
 
 def filter_routing_key(index):
@@ -77,25 +113,26 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
             message_type, article = message_protocol.external.recv_msg(client_socket)
             if message_type not in (
                 message_protocol.external.MsgType.ARTICLE,
-                message_protocol.external.MsgType.ARTICLE_LINE,
                 message_protocol.external.MsgType.END_OF_RECORDS,
             ):
                 raise ValueError("Expected an article or end of records")
-            if message_type == message_protocol.external.MsgType.ARTICLE_LINE:
-                article = parse_article_line(article)
-            if message_type != message_protocol.external.MsgType.END_OF_RECORDS:
-                filtered = message_protocol.internal.serialize_article(
-                    client_id, filter_article_fields(article, FILTER_FIELDS)
+            if message_type == message_protocol.external.MsgType.ARTICLE:
+                filtered_article, splitter_article = preprocess_article(parse_article(article))
+                filtered = message_protocol.internal.serialize_msg(
+                    message_protocol.internal.MsgType.FILTER_ARTICLE,
+                    client_id, message_protocol.internal.INPUT_QUERY_ID, *filtered_article,
                 )
-                split = message_protocol.internal.serialize_article(
-                    client_id, filter_article_fields(article, SPLITTER_FIELDS)
+                split = message_protocol.internal.serialize_msg(
+                    message_protocol.internal.MsgType.SPLITTER_ARTICLE,
+                    client_id, message_protocol.internal.INPUT_QUERY_ID, *splitter_article,
                 )
                 filter_exchange.send_rk(filtered, filter_routing_key(article_index))
                 article_index += 1
                 splitter_queue.send(split)
             else:
-                end_of_records = message_protocol.internal.serialize_end_of_records(
-                    client_id
+                end_of_records = message_protocol.internal.serialize_msg(
+                    message_protocol.internal.MsgType.END_OF_RECORDS,
+                    client_id, message_protocol.internal.INPUT_QUERY_ID,
                 )
                 for routing_key in filter_routing_keys():
                     filter_exchange.send_rk(end_of_records, routing_key)
