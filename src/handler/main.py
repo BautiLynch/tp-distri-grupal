@@ -4,7 +4,9 @@ import socket
 import signal
 import multiprocessing
 
-from common import middleware, message_protocol
+from common import middleware
+from common.message_protocol.internal import deserialize_msg, serialize_payload, MsgType as InternalMsgType
+from common.message_protocol.external import serialize_payload, recv_msg, send_msg, MsgType as ExternalMsgType
 
 SERVER_HOST = os.environ["SERVER_HOST"]
 SERVER_PORT = int(os.environ["SERVER_PORT"])
@@ -38,10 +40,10 @@ class ClientHandler:
         self.stopping = False
 
     def run(self):
-        message_type, client_id = message_protocol.external.recv_msg(
+        message_type, client_id = recv_msg(
             self.client_socket
         )
-        if message_type != message_protocol.external.MsgType.CLIENT_ID:
+        if message_type != ExternalMsgType.CLIENT_ID:
             raise ValueError("Expected a client ID to register the connection")
         if self.stopping:
             return
@@ -56,42 +58,35 @@ class ClientHandler:
         if self.stopping:
             return
 
-        message_protocol.external.send_msg(
+        send_msg(
             self.client_socket,
-            message_protocol.external.MsgType.ACK,
+            ExternalMsgType.ACK,
         )
         self.input_exchange.start_consuming(self.handle_result)
 
     def handle_result(self, message, ack, nack):
         try:
-            message_type, _, query_id, fields = (
-                message_protocol.internal.deserialize_msg(message)
+            message_type, _, fields = (
+                deserialize_msg(message)
             )
-            query_name = f"q{query_id}"
-            if query_name not in self.query_end_counts:
-                raise ValueError(f"Unexpected query id: {query_id}")
-            if query_name in self.completed_queries:
-                raise ValueError("Message received after query completion")
-            if message_type == message_protocol.internal.MsgType.Q1_RESULT:
-                if query_id != 1:
-                    raise ValueError("Q1_RESULT must belong to query 1")
-                payload = message_protocol.internal.serialize_payload(message_type, *fields)
-                message_protocol.external.send_msg(
-                    self.client_socket, message_protocol.external.MsgType.RESULT,
-                    query_id, payload,
-                )
-            elif message_type == message_protocol.internal.MsgType.QUERY_END:
+            if message_type == InternalMsgType.QUERY_END:
+                query_id = serialize_payload(message_type, *fields)
+                query_name = f"q{query_id}"
                 self.query_end_counts[query_name] += 1
                 if self.query_end_counts[query_name] == QUERY_REPLICAS[query_name]:
                     self.completed_queries.add(query_name)
                 self.finished = len(self.completed_queries) == len(QUERY_REPLICAS)
                 if self.finished:
-                    message_protocol.external.send_msg(
+                    send_msg(
                         self.client_socket,
-                        message_protocol.external.MsgType.END_OF_RECORDS,
+                        ExternalMsgType.END_OF_RECORDS,
                     )
             else:
-                raise ValueError("Unknown internal message type")
+                payload = serialize_payload(message_type, *fields)
+                send_msg(
+                    self.client_socket, ExternalMsgType.RESULT, message_type,
+                    payload,
+                )
         except Exception:
             nack()
             raise

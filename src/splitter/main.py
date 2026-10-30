@@ -3,20 +3,35 @@ import logging
 import signal
 import threading
 
-from common import middleware, message_protocol
+from common import middleware, hashing
+from common.message_protocol.internal import MsgType, serialize_msg, deserialize_msg
 
+ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
-OUTPUT_QUEUE = os.environ["OUTPUT_QUEUE"]
-INPUT_QUEUE = os.environ["INPUT_QUEUE"]
+INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
+EXCHANGE_QUERY_3 = os.environ["EXCHANGE_QUERY_3"]
+EXCHANGE_QUERY_4 = os.environ["EXCHANGE_QUERY_4"]
+EXCHANGE_QUERY_5 = os.environ["EXCHANGE_QUERY_5"]
+
 STOPWORDS_PATH = os.environ.get("STOPWORDS_PATH", "stopwords")
+AGGREGATION_AMOUNT = int(os.environ["AGGREGATION_AMOUNT"])
+FILTER_YEAR_AMOUNT = int(os.environ["FILTER_YEAR_AMOUNT"])
+FILTER_LANGUAGE_AMOUNT = int(os.environ["FILTER_LANGUAGE_AMOUNT"])
+
 
 class Splitter:
     def __init__(self):
-        self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
-            MOM_HOST, INPUT_QUEUE
+        self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, INPUT_EXCHANGE, [ID]
         )
-        self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
-            MOM_HOST, OUTPUT_QUEUE
+        self.output_exchange_3 = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, EXCHANGE_QUERY_3, [f"{index}" for index in range(FILTER_LANGUAGE_AMOUNT)]
+        )
+        self.output_exchange_4 = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, EXCHANGE_QUERY_4, [f"{index}" for index in range(AGGREGATION_AMOUNT)]
+        )
+        self.output_exchange_5 = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, EXCHANGE_QUERY_5, [f"{index}" for index in range(FILTER_YEAR_AMOUNT)]
         )
 
         self.en_stopwords = self._load_stopwords("english")
@@ -36,6 +51,7 @@ class Splitter:
     def _split_and_send(self, client_id, article):
         url, language, date_modified, abstract = article
         words = abstract.split(" ")
+
         for word in words:
             if self._is_stopword(word, language):
                 continue
@@ -43,12 +59,34 @@ class Splitter:
             self.word_count[word] = self.word_count.get(word, 0) + 1
 
         for word, amount in self.word_count.items():
-            message = message_protocol.internal.serialize_msg(
-                message_protocol.internal.MsgType.WORD,
-                client_id, message_protocol.internal.INPUT_QUERY_ID,
-                url, language, date_modified, word, amount,
-            )
-            self.output_queue.send(message)
+            key = hashing.get_hash_key(f"{client_id}_{word}", FILTER_LANGUAGE_AMOUNT)
+
+            self.output_exchange_3.send_to(
+                serialize_msg( # TODO: definir un orden fijo (class?)
+                    MsgType.WORD_LANGUAGE,
+                    client_id, 
+                    word, language, 
+                ), routing_key=key)
+
+            key = hashing.get_hash_key(f"{client_id}_{word}", AGGREGATION_AMOUNT) 
+
+            self.output_exchange_4.send_to(
+                serialize_msg( # TODO: definir un orden fijo (class?)
+                    MsgType.WORD_AMOUNT,
+                    client_id, 
+                    word, 
+                ), routing_key=key)
+
+            key = hashing.get_hash_key(f"{client_id}_{word}", FILTER_YEAR_AMOUNT) 
+            
+            self.output_exchange_5.send_to(
+                serialize_msg( # TODO: definir un orden fijo (class?)
+                    MsgType.WORD_YEAR_AMOUNT,
+                    client_id, 
+                    url, date_modified, amount 
+                ), routing_key=key)
+
+            # TODO: revisar como evitar repetir tanto codigo
 
     def _is_stopword(self, word, language):
         if language == "en":
@@ -61,17 +99,19 @@ class Splitter:
     def process_message(self, message, ack, nack):
         logging.info("Process message")
         try:
-            message_type, client_id, _, article = message_protocol.internal.deserialize_msg(message)
-            if message_type == message_protocol.internal.MsgType.SPLITTER_ARTICLE:
-                self._split_and_send(client_id, article)
-            elif message_type == message_protocol.internal.MsgType.END_OF_RECORDS:
+            message_type, client_id, fields = deserialize_msg(message)
+            if message_type == MsgType.SPLITTER_ARTICLE:
+                self._split_and_send(client_id, fields)
+
+            elif message_type == MsgType.END_OF_RECORDS:
                 logging.info("Received EOF")
-                self.output_queue.send(message_protocol.internal.serialize_msg(
-                    message_protocol.internal.MsgType.END_OF_RECORDS,
-                    client_id, message_protocol.internal.INPUT_QUERY_ID,
-                ))
+                self.output_exchange_3.send(message)
+                self.output_exchange_4.send(message)
+                self.output_exchange_5.send(message) 
+
             else:
                 raise ValueError(f"Unexpected splitter message type: {message_type}")
+            
         except Exception:
             logging.exception("Could not process splitter input")
             nack()
@@ -87,7 +127,7 @@ class Splitter:
 
     def start(self):
         try:
-            self.input_queue.start_consuming(self.process_message)
+            self.input_exchange.start_consuming(self.process_message)
         finally:
             self.close()
 

@@ -1,99 +1,30 @@
-import json
-import logging
+﻿import logging
 import multiprocessing
 import os
 import signal
 import socket
 
 from common import middleware, message_protocol
+from common.hashing.hashing import routing_key, routing_keys
+
+from helpers import preprocess_article, parse_article
 
 SERVER_HOST = os.environ["SERVER_HOST"]
 SERVER_PORT = int(os.environ["SERVER_PORT"])
 MOM_HOST = os.environ["MOM_HOST"]
 FILTER_PREFIX = os.environ["FILTER_PREFIX"]
 FILTER_AMOUNT = int(os.environ["FILTER_AMOUNT"])
-SPLITTER_QUEUE = os.environ["SPLITTER_QUEUE"]
+SPLITTER_PREFIX = os.environ["SPLITTER_PREFIX"]
+SPLITTER_AMOUNT = int(os.environ["SPLITTER_AMOUNT"])
 HANDLER_HOST = os.environ["HANDLER_HOST"]
 HANDLER_PORT = int(os.environ["HANDLER_PORT"])
 
 if FILTER_AMOUNT < 1:
     raise ValueError("FILTER_AMOUNT must be greater than zero")
 
-
-def parse_article(payload):
-    article = json.loads(payload.decode("utf-8"))
-    if not isinstance(article, dict):
-        raise ValueError("ARTICLE must contain a JSON object")
-    return article
-
-
-def article_text(article, field, default=None):
-    value = article.get(field)
-    if value is None:
-        value = default
-    if not isinstance(value, str):
-        raise ValueError(f"Article field {field} must be text")
-    return value
-
-
-def section_names(sections):
-    if sections is None:
-        return ()
-    if not isinstance(sections, list):
-        raise ValueError("Article sections must be a list")
-    names = []
-    _collect_section_names(sections, names)
-    return tuple(names)
-
-
-def _collect_section_names(sections, names):
-    for section in sections:
-        if not isinstance(section, dict):
-            raise ValueError("Article section must be an object")
-        if section.get("type") != "section":
-            continue
-        name = section.get("name")
-        if name is not None:
-            names.append(article_text(section, "name"))
-        parts = section.get("has_parts") or []
-        if not isinstance(parts, list):
-            raise ValueError("Section has_parts must be a list")
-        _collect_section_names(parts, names)
-
-
-def preprocess_article(article):
-    name = article_text(article, "name")
-    url = article_text(article, "url")
-    date_modified = article_text(article, "date_modified")
-    language = article.get("in_language")
-    if not isinstance(language, dict):
-        raise ValueError("Article in_language must contain an identifier")
-    language = article_text(language, "identifier")
-    image = article.get("image")
-    if image is not None and not isinstance(image, dict):
-        raise ValueError("Article image must be an object")
-    image_url = article_text(image or {}, "content_url", "")
-    filtered = (
-        name, url, language, date_modified, image_url,
-        section_names(article.get("sections")),
-    )
-    split = (
-        url, language, date_modified, article_text(article, "abstract", ""),
-    )
-    return filtered, split
-
-
-def filter_routing_key(index):
-    return f"{FILTER_PREFIX}_{index % FILTER_AMOUNT}"
-
-
-def filter_routing_keys():
-    return [f"{FILTER_PREFIX}_{index}" for index in range(FILTER_AMOUNT)]
-
-
 def handle_client_request(client_socket, client_id, client_dict, sigterm_received):
     filter_exchange = None
-    splitter_queue = None
+    splitter_exchange = None
     article_index = 0
     try:
         message_protocol.external.send_msg(
@@ -104,10 +35,10 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
             HANDLER_HOST, HANDLER_PORT,
         )
         filter_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, FILTER_PREFIX, []
+            MOM_HOST, FILTER_PREFIX, [f"{index}" for index in range(FILTER_AMOUNT)]
         )
-        splitter_queue = middleware.MessageMiddlewareQueueRabbitMQ(
-            MOM_HOST, SPLITTER_QUEUE
+        splitter_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, SPLITTER_PREFIX, [f"{index}" for index in range(SPLITTER_AMOUNT)]
         )
         while True:
             message_type, article = message_protocol.external.recv_msg(client_socket)
@@ -120,35 +51,36 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
                 filtered_article, splitter_article = preprocess_article(parse_article(article))
                 filtered = message_protocol.internal.serialize_msg(
                     message_protocol.internal.MsgType.FILTER_ARTICLE,
-                    client_id, message_protocol.internal.INPUT_QUERY_ID, *filtered_article,
+                    client_id, *filtered_article,
                 )
                 split = message_protocol.internal.serialize_msg(
                     message_protocol.internal.MsgType.SPLITTER_ARTICLE,
-                    client_id, message_protocol.internal.INPUT_QUERY_ID, *splitter_article,
+                    client_id, *splitter_article,
                 )
-                filter_exchange.send_rk(filtered, filter_routing_key(article_index))
+                filter_exchange.send_to(filtered, routing_key(FILTER_PREFIX, article_index, FILTER_AMOUNT))
+                splitter_exchange.send_to(split, routing_key(SPLITTER_PREFIX, article_index, SPLITTER_AMOUNT))
                 article_index += 1
-                splitter_queue.send(split)
             else:
                 end_of_records = message_protocol.internal.serialize_msg(
                     message_protocol.internal.MsgType.END_OF_RECORDS,
-                    client_id, message_protocol.internal.INPUT_QUERY_ID,
+                    client_id,
                 )
-                for routing_key in filter_routing_keys():
-                    filter_exchange.send_to(end_of_records, routing_key)
-                splitter_queue.send(end_of_records)
+                filter_exchange.send(end_of_records)
+                splitter_exchange.send(end_of_records)
+                    
             message_protocol.external.send_msg(
-                client_socket, message_protocol.external.MsgType.ACK
+                client_socket, message_protocol.external.MsgType.ACK # TODO: Esta bien que el cliente necesite un ACK? 
             )
             if message_type == message_protocol.external.MsgType.END_OF_RECORDS:
                 break
+
     except (socket.error, EOFError) as e:
         if not sigterm_received.value:
             logging.error("Client %s disconnected: %s", client_id, e)
     except Exception as e:
         logging.error("Client %s: %s", client_id, e)
     finally:
-        for mom in (filter_exchange, splitter_queue):
+        for mom in (filter_exchange, splitter_exchange):
             if mom is not None:
                 try:
                     mom.close()
