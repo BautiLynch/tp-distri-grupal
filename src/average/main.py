@@ -6,6 +6,7 @@ import threading
 
 from common import middleware, storage, hashing
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
+from splitter.main import FILTER_YEAR_AMOUNT
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
@@ -29,25 +30,27 @@ class Average:
         )
 
         self.urls_by_client = {}
+        self.eof_by_client = {}
         self.storage = storage.Storage(STORAGE_PATH)
         self.end_event = threading.Event()
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def _process_eof(self, client_id):
-        # urls = {}
-        # for key in self.storage.load_key(client_id):
-        #     urls[key.key] = urls.get(key.key, 0) + key.amount
+        self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
+        if self.eof_by_client[client_id] != FILTER_YEAR_AMOUNT:
+            return 
 
         date = datetime(YEAR, 1, 1)
         formatted_date = date.isoformat()
         
         for url, amount in self.urls_by_client.get(client_id, {}).items():
             key = hashing.get_hash_key(f"{client_id}_{url}", FILTER_AVERAGE_AMOUNT)
-            self.output_exchange.send_to(serialize_msg(MsgType.WORD_YEAR_AMOUNT, client_id, url, formatted_date, amount), routing_key=key)
-
+            self.output_exchange.send_to(
+                serialize_msg(MsgType.WORD_YEAR_AMOUNT, client_id, url, formatted_date, amount), routing_key=key
+            )
+        
         self.output_exchange.send(serialize_msg(MsgType.END_OF_RECORDS, client_id))
         self.urls_by_client[client_id] = {}
-        
 
     def process_message(self, message, ack, nack):
         message_type, client_id, fields = deserialize_msg(message)
