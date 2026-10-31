@@ -29,6 +29,8 @@ class FilterAverage:
         )
 
         self.eof_by_client = {}
+        # INVARIANTE: WORD_YEAR_AMOUNT llega 1 vez por (artículo, palabra única no-stopword).
+        # Por eso se cuenta 1 por URL y no se usa "amount" (que son las apariciones de esa palabra).
         self.words_by_client = {}
         self.average_by_client = {}
         self.pending_messages_by_client = {}
@@ -39,7 +41,9 @@ class FilterAverage:
     def _process_eof(self, client_id):
         self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
         if self.eof_by_client[client_id] == FILTER_YEAR_AMOUNT: 
-            amount_urls, amount_words = self.words_by_client.get(client_id, (0, 0))
+            words_by_url = self.words_by_client.get(client_id, {})
+            amount_urls = len(words_by_url)
+            amount_words = sum(words_by_url.values())
             self.average_by_client[client_id] = amount_words / amount_urls if amount_urls > 0 else 0
 
             for url, amount_words in self.pending_messages_by_client.get(client_id, []):
@@ -66,8 +70,8 @@ class FilterAverage:
             url, date_modified, amount = fields
 
             if datetime.fromisoformat(date_modified.replace("Z", "+00:00")).year <= YEAR:
-                url_count, word_count = self.words_by_client.get(client_id, (0, 0))
-                self.words_by_client[client_id] = (url_count + 1, word_count + amount)
+                words_by_url = self.words_by_client.setdefault(client_id, {})
+                words_by_url[url] = words_by_url.get(url, 0) + 1
             else:
                 self._process_abstract(client_id, url, amount)
 

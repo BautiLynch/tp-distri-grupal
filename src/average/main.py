@@ -54,7 +54,8 @@ class Average:
         if message_type == MsgType.WORD_YEAR_AMOUNT:
             url, date_modified, amount = fields
             urls = self.urls_by_client.setdefault(client_id, {})
-            urls[url] = urls.get(url, 0) + amount
+            # 1 mensaje = 1 palabra única del artículo; "amount" son las apariciones de esa palabra.
+            urls[url] = urls.get(url, 0) + 1
             #self.storage.store_key(*fields)
 
         elif message_type == MsgType.END_OF_RECORDS:
