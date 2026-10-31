@@ -12,6 +12,7 @@ MOM_HOST = os.environ["MOM_HOST"]
 OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 FILTER_YEAR_PLUS_AMOUNT = int(os.environ["FILTER_YEAR_PLUS_AMOUNT"])
+IMAGE_TIMEOUT = float(os.environ.get("IMAGE_TIMEOUT", "10"))
 
 
 class ImageGetter:
@@ -29,14 +30,24 @@ class ImageGetter:
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def _get_image(self, client_id, name, url, image_url):
-        with urllib.request.urlopen(image_url) as response: # TODO: Reintentos
+        with urllib.request.urlopen(image_url, timeout=IMAGE_TIMEOUT) as response:
             self.output_exchange.send_to(serialize_msg(MsgType.Q2_RESULT, client_id, name, url, response.read()), routing_key=client_id)
+
+    def _report_download_error(self, client_id, name, url):
+        # Se mantiene el contrato de la Q2: el artículo aparece con la imagen vacía.
+        self.output_exchange.send_to(serialize_msg(MsgType.Q2_RESULT, client_id, name, url, b""), routing_key=client_id)
 
     def process_message(self, message, ack, nack):
         message_type, client_id, fields = deserialize_msg(message)
         if message_type == MsgType.GET_IMAGE:
-            name, url, image_url = fields
-            self._get_image(client_id, name, url, image_url)
+            url, name, image_url = fields
+            try:
+                if not image_url:
+                    raise ValueError("el artículo no tiene image_url")
+                self._get_image(client_id, name, url, image_url)
+            except Exception as error:
+                logging.warning("No se pudo descargar la imagen de %s (%r): %s", url, image_url, error)
+                self._report_download_error(client_id, name, url)
 
         elif message_type == MsgType.END_OF_RECORDS:
             self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1

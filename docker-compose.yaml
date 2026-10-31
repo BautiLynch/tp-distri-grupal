@@ -176,6 +176,7 @@ services:
       INPUT_EXCHANGE: image_getter
       OUTPUT_EXCHANGE: results
       FILTER_YEAR_PLUS_AMOUNT: "1"
+      IMAGE_TIMEOUT: "10"
     healthcheck:
       test: ["CMD", "test", "-f", "/tmp/worker-ready"]
       interval: 2s
