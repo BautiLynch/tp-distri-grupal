@@ -38,29 +38,24 @@ class FilterYear:
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def _process_eof(self, client_id):
-        logging.info("Received EOF")
-
         amount_urls, amount_words = self.words_by_client.get(client_id, (0, 0))
         self.average_by_client[client_id] = amount_words / amount_urls if amount_urls > 0 else 0
 
 
     def process_message(self, message, ack, nack):
-        logging.info("Process message")
         message_type, client_id, fields = deserialize_msg(message)
         if message_type == MsgType.WORD_YEAR_AMOUNT:
             url, date_modified, amount = fields
             
-            # Se manda solo a un Average
-            if datetime.strptime(date_modified, "%d/%m/%Y %H:%M:%S").year <= YEAR:
-                key = hashing.get_hash_key(f"{client_id}_{url}", AVERAGE_AMOUNT)
-                self.output_exchange_average.send_to(message, routing_key=key) 
-            # Se manda a todos los Filter-Average
-            else:
+            # Los articulos hasta YEAR alimentan el promedio en todos los filtros.
+            if datetime.fromisoformat(date_modified.replace("Z", "+00:00")).year <= YEAR:
                 self.output_exchange_filter_average.send(message) 
+            # Los posteriores se acumulan por URL en un unico Average.
+            else:
+                key = hashing.get_hash_key(f"{client_id}_{url}", AVERAGE_AMOUNT)
+                self.output_exchange_average.send_to(message, routing_key=key)
 
-        if message_type == MsgType.END_OF_RECORDS:
-            logging.info("Received EOF")
-
+        elif message_type == MsgType.END_OF_RECORDS:
             self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
 
             if self.eof_by_client[client_id] == SPLITTER_AMOUNT:
@@ -79,7 +74,7 @@ class FilterYear:
         self.input_exchange.stop_consuming_threadsafe()
 
     def close(self):
-        for mom in [self.input_exchange, self.output_exchange]:
+        for mom in [self.input_exchange, self.output_exchange_average, self.output_exchange_filter_average]:
             try:
                 mom.close()
             except Exception as e:

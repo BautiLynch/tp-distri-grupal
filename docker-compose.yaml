@@ -2,8 +2,8 @@ services:
   rabbitmq:
     build:
       context: ./src/rabbitmq
-    environment:
-      RABBITMQ_LOG_LEVELS: error
+    volumes:
+      - ./src/rabbitmq/logging.conf:/etc/rabbitmq/conf.d/20-logging.conf:ro
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
       interval: 5s
@@ -36,11 +36,6 @@ services:
       FILTER_AMOUNT: "1"
       SPLITTER_PREFIX: splitter
       SPLITTER_AMOUNT: "1"
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 5678), 2).close()"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
 
   handler:
     depends_on:
@@ -60,11 +55,6 @@ services:
       QUERY_3_REPLICAS: "1"
       QUERY_4_REPLICAS: "1"
       QUERY_5_REPLICAS: "1"
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 5679), 2).close()"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
 
   client_0:
     build:
@@ -72,9 +62,9 @@ services:
       dockerfile: client/Dockerfile
     depends_on:
       gateway:
-        condition: service_healthy
+        condition: service_started
       handler:
-        condition: service_healthy
+        condition: service_started
       filter_0:
         condition: service_healthy
       image_getter_0:
@@ -99,6 +89,44 @@ services:
       GATEWAY_PORT: "5678"
       INPUT_PATH: /datasets/wikipedia-1000.jsonl
       OUTPUT_PATH: /output/output_0.bin
+      CONNECTION_TIMEOUT: "10"
+    volumes:
+      - ./datasets:/datasets:ro
+      - ./output:/output
+
+  client_1:
+    build:
+      context: ./src
+      dockerfile: client/Dockerfile
+    depends_on:
+      gateway:
+        condition: service_started
+      handler:
+        condition: service_started
+      filter_0:
+        condition: service_healthy
+      image_getter_0:
+        condition: service_healthy
+      splitter_0:
+        condition: service_healthy
+      filter_language_0:
+        condition: service_healthy
+      aggregation_0:
+        condition: service_healthy
+      join:
+        condition: service_healthy
+      filter_year_0:
+        condition: service_healthy
+      average_0:
+        condition: service_healthy
+      filter_average_0:
+        condition: service_healthy
+    environment:
+      PYTHONUNBUFFERED: "1"
+      GATEWAY_HOST: gateway
+      GATEWAY_PORT: "5678"
+      INPUT_PATH: /datasets/wikipedia-1000.jsonl
+      OUTPUT_PATH: /output/output_1.bin
       CONNECTION_TIMEOUT: "10"
     volumes:
       - ./datasets:/datasets:ro
@@ -351,6 +379,10 @@ services:
       timeout: 1s
       retries: 30
       start_period: 10s
+
+networks:
+  default:
+    name: tp-distri-grupal-network
 
 volumes:
   aggregation_storage:

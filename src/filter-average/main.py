@@ -15,7 +15,7 @@ OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 AVERAGE_AMOUNT = int(os.environ["AVERAGE_AMOUNT"])
 FILTER_YEAR_AMOUNT = int(os.environ["FILTER_YEAR_AMOUNT"])
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
-YEAR = os.environ.get("YEAR")
+YEAR = int(os.environ["YEAR"])
 
 
 class FilterAverage:
@@ -37,8 +37,6 @@ class FilterAverage:
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def _process_eof(self, client_id):
-        logging.info("Received EOF")
-
         self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
         if self.eof_by_client[client_id] == FILTER_YEAR_AMOUNT: 
             amount_urls, amount_words = self.words_by_client.get(client_id, (0, 0))
@@ -53,8 +51,6 @@ class FilterAverage:
             self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q5_RESULT), routing_key=client_id) 
 
     def _process_abstract(self, client_id, url, amount_words):
-        logging.info("Received abstract")
-
         if self.average_by_client.get(client_id) is None:
             logging.warning(f"Average for client {client_id} not calculated yet")
 
@@ -65,18 +61,17 @@ class FilterAverage:
             self.output_exchange.send_to(serialize_msg(MsgType.Q5_RESULT, client_id, url, amount_words), routing_key=client_id)
 
     def process_message(self, message, ack, nack):
-        logging.info("Process message")
         message_type, client_id, fields = deserialize_msg(message)
         if message_type == MsgType.WORD_YEAR_AMOUNT:
             url, date_modified, amount = fields
 
-            if datetime.strptime(date_modified, "%d/%m/%Y %H:%M:%S").year <= YEAR:
+            if datetime.fromisoformat(date_modified.replace("Z", "+00:00")).year <= YEAR:
                 url_count, word_count = self.words_by_client.get(client_id, (0, 0))
                 self.words_by_client[client_id] = (url_count + 1, word_count + amount)
             else:
                 self._process_abstract(client_id, url, amount)
 
-        if message_type == MsgType.END_OF_RECORDS:
+        elif message_type == MsgType.END_OF_RECORDS:
             self._process_eof(client_id)
 
         else:

@@ -49,7 +49,7 @@ class JoinFilter:
         final_top.sort(reverse=True)
 
         result = [
-            (item.word, item.amount)
+            (item.key, item.amount)
             for item in final_top
         ]
 
@@ -60,11 +60,9 @@ class JoinFilter:
         self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q4_RESULT), routing_key=client_id)
         
     def process_message(self, message, ack, nack):
-        logging.info("Received top")
-        
         message_type, client_id, fields = deserialize_msg(message)
         if message_type == MsgType.Q4_RESULT:
-            self._process_data(*fields)
+            self._process_data(client_id, *fields)
             self._all_tops_recieved(client_id)
         else:
             nack()

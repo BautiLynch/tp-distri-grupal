@@ -11,6 +11,8 @@ from .middleware import (
 )
 from pika.exceptions import AMQPConnectionError, AMQPError
 
+logging.getLogger("pika").setLevel(logging.WARNING)
+
 
 class _MessageMiddlewareRabbitMQBase:
     def __init__(self, host, exchange, routing_keys):
@@ -139,6 +141,8 @@ class MessageMiddlewareExchangeRabbitMQ(_MessageMiddlewareRabbitMQBase, MessageM
             )
 
     def send_to(self, message, routing_key):
+        if isinstance(routing_key, int):
+            routing_key = str(routing_key)
         try:
             with self._publish_lock:
                 self.chan.basic_publish(

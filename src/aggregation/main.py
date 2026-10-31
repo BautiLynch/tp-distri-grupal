@@ -31,8 +31,6 @@ class AggregationFilter:
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def _process_eof(self, client_id):
-        logging.info("Received EOF")
-
         # for key in self.storage.load_key(client_id):
         #    top_words[key.key] = top_words.get(key.key, 0) + key.amount
 
@@ -48,11 +46,9 @@ class AggregationFilter:
 
 
     def process_message(self, message, ack, nack):
-        logging.info("Process message")
-        
         message_type, client_id, fields = deserialize_msg(message)
         if message_type == MsgType.WORD_AMOUNT:
-            client_id, word = fields
+            word, = fields
             self.words_by_client[client_id] = self.words_by_client.get(client_id, {})
             self.words_by_client[client_id][word] = self.words_by_client[client_id].get(word, 0) + 1
             #self.storage.store_key(client_id, key, 1)

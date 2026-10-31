@@ -34,14 +34,12 @@ class Average:
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def _process_eof(self, client_id):
-        logging.info("Received EOF")
-
         # urls = {}
         # for key in self.storage.load_key(client_id):
         #     urls[key.key] = urls.get(key.key, 0) + key.amount
 
         date = datetime(YEAR, 1, 1)
-        formatted_date = date.strftime("%d/%m/%Y %H:%M:%S")
+        formatted_date = date.isoformat()
         
         for url, amount in self.urls_by_client.get(client_id, {}).items():
             key = hashing.get_hash_key(f"{client_id}_{url}", FILTER_AVERAGE_AMOUNT)
@@ -52,7 +50,6 @@ class Average:
         
 
     def process_message(self, message, ack, nack):
-        logging.info("Process message")
         message_type, client_id, fields = deserialize_msg(message)
         if message_type == MsgType.WORD_YEAR_AMOUNT:
             url, date_modified, amount = fields
@@ -61,7 +58,7 @@ class Average:
             #self.storage.store_key(*fields)
 
         elif message_type == MsgType.END_OF_RECORDS:
-            self._process_eof(*fields)
+            self._process_eof(client_id)
         else:
             nack()
             return

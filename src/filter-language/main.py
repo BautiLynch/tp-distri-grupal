@@ -31,8 +31,6 @@ class FilterLanguage:
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def process_message(self, message, ack, nack):
-        logging.info("Process message")
-
         message_type, client_id, fields = deserialize_msg(message)
         if message_type == MsgType.WORD_LANGUAGE:
             word, language = fields
@@ -52,9 +50,7 @@ class FilterLanguage:
                     logging.info("Received word in both languages")
                     self.output_exchange.send_to(serialize_msg(MsgType.Q3_RESULT, client_id, word), routing_key=client_id) 
 
-        if message_type == MsgType.END_OF_RECORDS:
-            logging.info("Received EOF")
-
+        elif message_type == MsgType.END_OF_RECORDS:
             self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
             if self.eof_by_client[client_id] == SPLITTER_AMOUNT:
                 self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q3_RESULT), routing_key=client_id) 
