@@ -13,6 +13,8 @@ OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 FILTER_YEAR_PLUS_AMOUNT = int(os.environ["FILTER_YEAR_PLUS_AMOUNT"])
 IMAGE_TIMEOUT = float(os.environ.get("IMAGE_TIMEOUT", "10"))
+# Wikimedia rechaza (403) pedidos con el User-Agent por defecto de urllib.
+IMAGE_USER_AGENT = os.environ.get("IMAGE_USER_AGENT", "tp-distribuidos/1.0 (UTN-FRBA)")
 
 
 class ImageGetter:
@@ -30,7 +32,8 @@ class ImageGetter:
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def _get_image(self, client_id, name, url, image_url):
-        with urllib.request.urlopen(image_url, timeout=IMAGE_TIMEOUT) as response:
+        request = urllib.request.Request(image_url, headers={"User-Agent": IMAGE_USER_AGENT})
+        with urllib.request.urlopen(request, timeout=IMAGE_TIMEOUT) as response:
             self.output_exchange.send_to(serialize_msg(MsgType.Q2_RESULT, client_id, name, url, response.read()), routing_key=client_id)
 
     def _report_download_error(self, client_id, name, url):

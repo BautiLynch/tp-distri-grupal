@@ -1,3 +1,39 @@
+x-cliente: &cliente
+  build:
+    context: ./src
+    dockerfile: client/Dockerfile
+  depends_on:
+    gateway:
+      condition: service_started
+    handler:
+      condition: service_started
+    filter_0:
+      condition: service_healthy
+    image_getter_0:
+      condition: service_healthy
+    splitter_0:
+      condition: service_healthy
+    filter_language_0:
+      condition: service_healthy
+    aggregation_0:
+      condition: service_healthy
+    join:
+      condition: service_healthy
+    filter_year_0:
+      condition: service_healthy
+    average_0:
+      condition: service_healthy
+    filter_average_0:
+      condition: service_healthy
+  environment: &cliente-env
+    PYTHONUNBUFFERED: "1"
+    GATEWAY_HOST: gateway
+    GATEWAY_PORT: "5678"
+    CONNECTION_TIMEOUT: "10"
+  volumes:
+    - ./datasets:/datasets:ro
+    - ./output:/output
+
 services:
   rabbitmq:
     build:
@@ -57,6 +93,7 @@ services:
       QUERY_5_REPLICAS: "1"
 
   client_0:
+    profiles: ["dos"]
     build:
       context: ./src
       dockerfile: client/Dockerfile
@@ -95,6 +132,7 @@ services:
       - ./output:/output
 
   client_1:
+    profiles: ["dos"]
     build:
       context: ./src
       dockerfile: client/Dockerfile
@@ -131,6 +169,34 @@ services:
     volumes:
       - ./datasets:/datasets:ro
       - ./output:/output
+
+  client_v1_a:
+    <<: *cliente
+    environment:
+      <<: *cliente-env
+      INPUT_PATH: /datasets/wikipedia-1000.jsonl
+      OUTPUT_PATH: /output/v1_cliente_a.bin
+
+  client_v1_b:
+    <<: *cliente
+    environment:
+      <<: *cliente-env
+      INPUT_PATH: /datasets/wikipedia-1000.jsonl
+      OUTPUT_PATH: /output/v1_cliente_b.bin
+
+  client_v2_a:
+    <<: *cliente
+    environment:
+      <<: *cliente-env
+      INPUT_PATH: /datasets/wikipedia-1000-v2.jsonl
+      OUTPUT_PATH: /output/v2_cliente_a.bin
+
+  client_v2_b:
+    <<: *cliente
+    environment:
+      <<: *cliente-env
+      INPUT_PATH: /datasets/wikipedia-1000-v2.jsonl
+      OUTPUT_PATH: /output/v2_cliente_b.bin
 
   filter_0:
     build:
