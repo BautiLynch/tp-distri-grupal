@@ -6,7 +6,6 @@ import threading
 
 from common import middleware, storage, hashing
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
-from splitter.main import FILTER_YEAR_AMOUNT
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
@@ -14,6 +13,7 @@ AVERAGE_PREFIX = os.environ["AVERAGE_PREFIX"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 FILTER_AVERAGE_AMOUNT = int(os.environ["FILTER_AVERAGE_AMOUNT"])
+FILTER_YEAR_AMOUNT = int(os.environ["FILTER_YEAR_AMOUNT"])
 YEAR = int(os.environ.get("YEAR"))
 
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
