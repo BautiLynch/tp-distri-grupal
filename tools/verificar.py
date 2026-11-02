@@ -79,11 +79,11 @@ def language_of(article):
     return language.get("identifier")
 
 
-def unique_words(article, stopwords):
-    """Palabras unicas no-stopword del articulo, tal como las manda el splitter."""
+def word_occurrences(article, stopwords):
+    """Palabras no-stopword del articulo, sin deduplicar (el splitter manda el amount)."""
     ignored = stopwords.get(language_of(article), set())
     abstract = text_of(article, "abstract")
-    return {word for word in abstract.split(" ") if word not in ignored}
+    return [word for word in abstract.split(" ") if word not in ignored]
 
 
 def year_of(article):
@@ -114,14 +114,15 @@ def expected_results(articles, stopwords, year, language, sections, top_size):
     q2 = collections.Counter()
     q3_en, q3_fr = set(), set()
     word_articles = collections.Counter()
-    pre_words = collections.Counter()   # url -> palabras unicas de articulos <= year
-    post_words = collections.Counter()  # url -> palabras unicas de articulos > year
+    pre_words = collections.Counter()   
+    post_words = collections.Counter()  
 
     for article in articles:
         article_language = language_of(article)
         article_year = year_of(article)
         url = article["url"]
-        words = unique_words(article, stopwords)
+        occurrences = word_occurrences(article, stopwords)
+        words = set(occurrences)
 
         if article_year <= year:
             if article_language == language:
@@ -129,9 +130,9 @@ def expected_results(articles, stopwords, year, language, sections, top_size):
             names = {name.lower() for name in section_names(article)}
             if wanted_sections.intersection(names):
                 q2[(text_of(article, "name"), url)] += 1
-            pre_words[url] += len(words)
+            pre_words[url] += len(occurrences)
         else:
-            post_words[url] += len(words)
+            post_words[url] += len(occurrences)
 
         for word in words:
             word_articles[word] += 1

@@ -76,7 +76,7 @@ class FilterAverage:
 
             if datetime.fromisoformat(date_modified.replace("Z", "+00:00")).year <= YEAR:
                 words_by_url = self.words_by_client.setdefault(client_id, {})
-                words_by_url[url] = words_by_url.get(url, 0) + 1
+                words_by_url[url] = words_by_url.get(url, 0) + amount
             else:
                 self._process_abstract(client_id, url, amount)
 
