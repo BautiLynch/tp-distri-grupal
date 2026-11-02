@@ -95,7 +95,7 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
         client_dict.pop(client_id, None)
 
 
-def handle_sigterm(server_socket, client_dict, sigterm_received):
+def handle_sigterm(server_socket, client_dict, sigterm_received): # TODO: Se supone que el shutdown se hace en el "finally" del "start"
     sigterm_received.value = 1
     for connection in [server_socket, *client_dict.values()]:
         try:
@@ -110,7 +110,7 @@ def main():
     with multiprocessing.Manager() as manager:
         client_dict = manager.dict()
         sigterm_received = manager.Value("c_short", 0)
-        with multiprocessing.Pool(processes=os.process_cpu_count()) as processes_pool:
+        with multiprocessing.Pool(processes=os.process_cpu_count()) as processes_pool: # TODO: Hace falta crear tantos procesos?
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
                 server_socket.bind((SERVER_HOST, SERVER_PORT))
                 server_socket.listen()
