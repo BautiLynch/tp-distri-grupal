@@ -37,11 +37,6 @@ class FilterYear:
         self.end_event = threading.Event()
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
-    def _process_eof(self, client_id):
-        amount_urls, amount_words = self.words_by_client.get(client_id, (0, 0))
-        self.average_by_client[client_id] = amount_words / amount_urls if amount_urls > 0 else 0
-
-
     def process_message(self, message, ack, nack):
         message_type, client_id, fields = deserialize_msg(message)
         if message_type == MsgType.WORD_YEAR_AMOUNT:
@@ -61,11 +56,16 @@ class FilterYear:
             if self.eof_by_client[client_id] == SPLITTER_AMOUNT:
                 self.output_exchange_average.send(message)
                 self.output_exchange_filter_average.send(message)
+                self._release_client(client_id)
 
         else:
             nack()
             return
         ack()
+
+    def _release_client(self, client_id):
+        self.eof_by_client.pop(client_id, None)
+        logging.debug("Released state for client %s", client_id)
 
     def sigterm_handler(self, signum, frame):
         if self.end_event.is_set():

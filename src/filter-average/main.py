@@ -29,8 +29,6 @@ class FilterAverage:
         )
 
         self.eof_by_client = {}
-        # INVARIANTE: WORD_YEAR_AMOUNT llega 1 vez por (artículo, palabra única no-stopword).
-        # Por eso se cuenta 1 por URL y no se usa "amount" (que son las apariciones de esa palabra).
         self.words_by_client = {}
         self.average_by_client = {}
         self.pending_messages_by_client = {}
@@ -49,10 +47,17 @@ class FilterAverage:
             for url, amount_words in self.pending_messages_by_client.get(client_id, []):
                 self._process_abstract(client_id, url, amount_words)
 
-            self.pending_messages_by_client[client_id] = []
-
         elif self.eof_by_client[client_id] == AVERAGE_AMOUNT + FILTER_YEAR_AMOUNT:
-            self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q5_RESULT), routing_key=client_id) 
+            self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q5_RESULT), routing_key=client_id)
+            self._release_client(client_id)
+
+    def _release_client(self, client_id):
+        # Q5 termino: se libera todo el estado del cliente.
+        self.eof_by_client.pop(client_id, None)
+        self.words_by_client.pop(client_id, None)
+        self.pending_messages_by_client.pop(client_id, None)
+        self.average_by_client.pop(client_id, None)
+        logging.debug("Released state for client %s", client_id)
 
     def _process_abstract(self, client_id, url, amount_words):
         if self.average_by_client.get(client_id) is None:

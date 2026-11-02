@@ -56,11 +56,16 @@ class ImageGetter:
             self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
             if self.eof_by_client[client_id] == FILTER_YEAR_PLUS_AMOUNT:
                 self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q2_RESULT), routing_key=client_id)
+                self._release_client(client_id)
 
         else:
             nack()
             return
         ack()
+
+    def _release_client(self, client_id):
+        self.eof_by_client.pop(client_id, None)
+        logging.debug("Released state for client %s", client_id)
 
     def close(self):
         for mom in [self.input_exchange, self.output_exchange]:
