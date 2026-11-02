@@ -47,7 +47,6 @@ class FilterLanguage:
                 self.words_by_client[client_id] = word_sent
 
                 if len(language_sent) == 2:
-                    logging.info("Received word in both languages")
                     self.output_exchange.send_to(serialize_msg(MsgType.Q3_RESULT, client_id, word), routing_key=client_id) 
 
         elif message_type == MsgType.END_OF_RECORDS:

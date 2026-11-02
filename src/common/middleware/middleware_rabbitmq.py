@@ -1,6 +1,4 @@
 import logging
-import os
-from pathlib import Path
 import pika
 import threading
 from .middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
@@ -22,10 +20,6 @@ class _MessageMiddlewareRabbitMQBase:
         self._consuming = False
         self.queue_name = None
         self._publish_lock = threading.Lock()
-        readiness_file = os.environ.get("READINESS_FILE")
-        self._readiness_file = Path(readiness_file) if readiness_file else None
-        if self._readiness_file is not None:
-            self._readiness_file.unlink(missing_ok=True)
         try:
             self.conn = pika.BlockingConnection(pika.ConnectionParameters(host=host))
             self.chan = self.conn.channel()
@@ -68,17 +62,11 @@ class _MessageMiddlewareRabbitMQBase:
                 on_message_callback=_pika_callback,
                 auto_ack=False,
             )
-            # basic_consume retorna cuando RabbitMQ confirma el consumidor.
-            if self._readiness_file is not None:
-                self._readiness_file.touch()
             self.chan.start_consuming()
         except AMQPConnectionError:
             raise MessageMiddlewareDisconnectedError
         except AMQPError:
             raise MessageMiddlewareMessageError
-        finally:
-            if self._readiness_file is not None:
-                self._readiness_file.unlink(missing_ok=True)
 
     def stop_consuming(self):
         if not self._consuming:
