@@ -4,7 +4,7 @@ import logging
 import signal
 import threading
 
-from common import middleware
+from common import middleware, hashing
 from common.message_protocol.internal import deserialize_msg, MsgType, serialize_msg
 
 ID = os.environ["ID"]
@@ -47,7 +47,11 @@ class FilterYearPlus:
                         self.output_exchange.send_to(serialize_msg(MsgType.Q1_RESULT, client_id, url, date_modified), routing_key=client_id)
 
                     if self.sections.intersection(section.lower() for section in sections):
-                        self.output_exchange_image.send_to(serialize_msg(MsgType.GET_IMAGE, client_id, url, name, image_url), routing_key=client_id)
+                        key = hashing.get_hash_key(f"{client_id}_{url}", IMAGE_GETTER_AMOUNT)
+                        self.output_exchange_image.send_to(
+                            serialize_msg(MsgType.GET_IMAGE, client_id, url, name, image_url),
+                            routing_key=key,
+                        )
             
             elif message_type == MsgType.END_OF_RECORDS:
                 self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q1_RESULT), routing_key=client_id)

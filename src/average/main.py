@@ -13,6 +13,7 @@ AVERAGE_PREFIX = os.environ["AVERAGE_PREFIX"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 FILTER_AVERAGE_AMOUNT = int(os.environ["FILTER_AVERAGE_AMOUNT"])
+FILTER_YEAR_AMOUNT = int(os.environ["FILTER_YEAR_AMOUNT"])
 YEAR = int(os.environ.get("YEAR"))
 
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
@@ -29,25 +30,32 @@ class Average:
         )
 
         self.urls_by_client = {}
+        self.eof_by_client = {}
         self.storage = storage.Storage(STORAGE_PATH)
         self.end_event = threading.Event()
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def _process_eof(self, client_id):
-        # urls = {}
-        # for key in self.storage.load_key(client_id):
-        #     urls[key.key] = urls.get(key.key, 0) + key.amount
+        self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
+        if self.eof_by_client[client_id] != FILTER_YEAR_AMOUNT:
+            return 
 
         date = datetime(YEAR, 1, 1)
         formatted_date = date.isoformat()
         
         for url, amount in self.urls_by_client.get(client_id, {}).items():
             key = hashing.get_hash_key(f"{client_id}_{url}", FILTER_AVERAGE_AMOUNT)
-            self.output_exchange.send_to(serialize_msg(MsgType.WORD_YEAR_AMOUNT, client_id, url, formatted_date, amount), routing_key=key)
-
-        self.output_exchange.send(serialize_msg(MsgType.END_OF_RECORDS, client_id))
-        self.urls_by_client[client_id] = {}
+            self.output_exchange.send_to(
+                serialize_msg(MsgType.WORD_YEAR_AMOUNT, client_id, url, formatted_date, amount), routing_key=key
+            )
         
+        self.output_exchange.send(serialize_msg(MsgType.END_OF_RECORDS, client_id))
+        self._release_client(client_id)
+
+    def _release_client(self, client_id):
+        self.eof_by_client.pop(client_id, None)
+        self.urls_by_client.pop(client_id, None)
+        logging.debug("Released state for client %s", client_id)
 
     def process_message(self, message, ack, nack):
         message_type, client_id, fields = deserialize_msg(message)
@@ -55,7 +63,6 @@ class Average:
             url, date_modified, amount = fields
             urls = self.urls_by_client.setdefault(client_id, {})
             urls[url] = urls.get(url, 0) + amount
-            #self.storage.store_key(*fields)
 
         elif message_type == MsgType.END_OF_RECORDS:
             self._process_eof(client_id)

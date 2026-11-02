@@ -39,16 +39,25 @@ class FilterAverage:
     def _process_eof(self, client_id):
         self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
         if self.eof_by_client[client_id] == FILTER_YEAR_AMOUNT: 
-            amount_urls, amount_words = self.words_by_client.get(client_id, (0, 0))
+            words_by_url = self.words_by_client.get(client_id, {})
+            amount_urls = len(words_by_url)
+            amount_words = sum(words_by_url.values())
             self.average_by_client[client_id] = amount_words / amount_urls if amount_urls > 0 else 0
 
             for url, amount_words in self.pending_messages_by_client.get(client_id, []):
                 self._process_abstract(client_id, url, amount_words)
 
-            self.pending_messages_by_client[client_id] = []
-
         elif self.eof_by_client[client_id] == AVERAGE_AMOUNT + FILTER_YEAR_AMOUNT:
-            self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q5_RESULT), routing_key=client_id) 
+            self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q5_RESULT), routing_key=client_id)
+            self._release_client(client_id)
+
+    def _release_client(self, client_id):
+        # Q5 termino: se libera todo el estado del cliente.
+        self.eof_by_client.pop(client_id, None)
+        self.words_by_client.pop(client_id, None)
+        self.pending_messages_by_client.pop(client_id, None)
+        self.average_by_client.pop(client_id, None)
+        logging.debug("Released state for client %s", client_id)
 
     def _process_abstract(self, client_id, url, amount_words):
         if self.average_by_client.get(client_id) is None:
@@ -66,8 +75,8 @@ class FilterAverage:
             url, date_modified, amount = fields
 
             if datetime.fromisoformat(date_modified.replace("Z", "+00:00")).year <= YEAR:
-                url_count, word_count = self.words_by_client.get(client_id, (0, 0))
-                self.words_by_client[client_id] = (url_count + 1, word_count + amount)
+                words_by_url = self.words_by_client.setdefault(client_id, {})
+                words_by_url[url] = words_by_url.get(url, 0) + amount
             else:
                 self._process_abstract(client_id, url, amount)
 

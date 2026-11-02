@@ -1,3 +1,270 @@
+x-healthcheck: &healthcheck
+  test: ["CMD", "test", "-f", "/tmp/worker-ready"]
+  interval: 2s
+  timeout: 1s
+  retries: 30
+  start_period: 10s
+
+x-worker-env: &worker-env
+  READINESS_FILE: /tmp/worker-ready
+  MOM_HOST: rabbitmq
+  PYTHONUNBUFFERED: "1"
+
+x-cliente-env: &cliente-env
+  PYTHONUNBUFFERED: "1"
+  GATEWAY_HOST: gateway
+  GATEWAY_PORT: "5678"
+  CONNECTION_TIMEOUT: "10"
+
+x-cliente: &cliente
+  build:
+    context: ./src
+    dockerfile: client/Dockerfile
+  depends_on:
+    gateway:
+      condition: service_started
+    handler:
+      condition: service_started
+    filter_0:
+      condition: service_healthy
+    filter_1:
+      condition: service_healthy
+    image_getter_0:
+      condition: service_healthy
+    image_getter_1:
+      condition: service_healthy
+    splitter_0:
+      condition: service_healthy
+    splitter_1:
+      condition: service_healthy
+    filter_language_0:
+      condition: service_healthy
+    filter_language_1:
+      condition: service_healthy
+    aggregation_0:
+      condition: service_healthy
+    aggregation_1:
+      condition: service_healthy
+    join:
+      condition: service_healthy
+    filter_year_0:
+      condition: service_healthy
+    filter_year_1:
+      condition: service_healthy
+    average_0:
+      condition: service_healthy
+    average_1:
+      condition: service_healthy
+    filter_average_0:
+      condition: service_healthy
+    filter_average_1:
+      condition: service_healthy
+  environment:
+    <<: *cliente-env
+  volumes:
+    - ./datasets:/datasets:ro
+    - ./output:/output
+
+x-filter-env: &filter-env
+  <<: *worker-env
+  INPUT_EXCHANGE: filter
+  OUTPUT_EXCHANGE_1: results
+  OUTPUT_EXCHANGE_2: image_getter
+  IMAGE_GETTER_PREFIX: image_getter
+  IMAGE_GETTER_AMOUNT: "2"
+  LANGUAGE: en
+  SECTIONS: Biography,Biographie
+  YEAR: "2020"
+
+x-filter: &filter
+  build:
+    context: ./src
+    dockerfile: filter/Dockerfile
+  depends_on:
+    rabbitmq:
+      condition: service_healthy
+    image_getter_0:
+      condition: service_healthy
+    image_getter_1:
+      condition: service_healthy
+  environment:
+    <<: *filter-env
+    ID: "0"
+  healthcheck: *healthcheck
+
+x-image-getter-env: &image-getter-env
+  <<: *worker-env
+  INPUT_EXCHANGE: image_getter
+  OUTPUT_EXCHANGE: results
+  FILTER_YEAR_PLUS_AMOUNT: "2"
+  IMAGE_TIMEOUT: "10"
+
+x-image-getter: &image-getter
+  build:
+    context: ./src
+    dockerfile: image-getter/Dockerfile
+  depends_on:
+    rabbitmq:
+      condition: service_healthy
+  environment:
+    <<: *image-getter-env
+    ID: "0"
+  healthcheck: *healthcheck
+
+x-splitter-env: &splitter-env
+  <<: *worker-env
+  INPUT_EXCHANGE: splitter
+  EXCHANGE_QUERY_3: filter_language
+  EXCHANGE_QUERY_4: aggregation
+  EXCHANGE_QUERY_5: filter_year
+  STOPWORDS_PATH: /stopwords
+  AGGREGATION_AMOUNT: "2"
+  FILTER_YEAR_AMOUNT: "2"
+  FILTER_LANGUAGE_AMOUNT: "2"
+
+x-splitter: &splitter
+  build:
+    context: ./src
+    dockerfile: splitter/Dockerfile
+  depends_on:
+    rabbitmq:
+      condition: service_healthy
+    filter_language_0:
+      condition: service_healthy
+    filter_language_1:
+      condition: service_healthy
+    aggregation_0:
+      condition: service_healthy
+    aggregation_1:
+      condition: service_healthy
+    filter_year_0:
+      condition: service_healthy
+    filter_year_1:
+      condition: service_healthy
+  environment:
+    <<: *splitter-env
+    ID: "0"
+  healthcheck: *healthcheck
+
+x-filter-language-env: &filter-language-env
+  <<: *worker-env
+  INPUT_EXCHANGE: filter_language
+  OUTPUT_EXCHANGE: results
+  SPLITTER_AMOUNT: "2"
+  STORAGE_PATH: /storage
+
+x-filter-language: &filter-language
+  build:
+    context: ./src
+    dockerfile: filter-language/Dockerfile
+  depends_on:
+    rabbitmq:
+      condition: service_healthy
+  environment:
+    <<: *filter-language-env
+    ID: "0"
+  healthcheck: *healthcheck
+
+x-aggregation-env: &aggregation-env
+  <<: *worker-env
+  INPUT_EXCHANGE: aggregation
+  OUTPUT_QUEUE: join_queue
+  SPLITTER_AMOUNT: "2"
+  TOP_SIZE: "20"
+  STORAGE_PATH: /storage
+
+x-aggregation: &aggregation
+  build:
+    context: ./src
+    dockerfile: aggregation/Dockerfile
+  depends_on:
+    rabbitmq:
+      condition: service_healthy
+    join:
+      condition: service_healthy
+  environment:
+    <<: *aggregation-env
+    ID: "0"
+  healthcheck: *healthcheck
+
+x-filter-year-env: &filter-year-env
+  <<: *worker-env
+  INPUT_EXCHANGE: filter_year
+  AVERAGE_EXCHANGE: average
+  AVERAGE_AMOUNT: "2"
+  FILTER_AVERAGE_EXCHANGE: filter_average
+  FILTER_AVERAGE_AMOUNT: "2"
+  SPLITTER_AMOUNT: "2"
+  YEAR: "2020"
+  STORAGE_PATH: /storage
+
+x-filter-year: &filter-year
+  build:
+    context: ./src
+    dockerfile: filter-year/Dockerfile
+  depends_on:
+    rabbitmq:
+      condition: service_healthy
+    average_0:
+      condition: service_healthy
+    average_1:
+      condition: service_healthy
+    filter_average_0:
+      condition: service_healthy
+    filter_average_1:
+      condition: service_healthy
+  environment:
+    <<: *filter-year-env
+    ID: "0"
+  healthcheck: *healthcheck
+
+x-average-env: &average-env
+  <<: *worker-env
+  AVERAGE_PREFIX: average
+  INPUT_EXCHANGE: average
+  OUTPUT_EXCHANGE: filter_average
+  FILTER_AVERAGE_AMOUNT: "2"
+  FILTER_YEAR_AMOUNT: "2"
+  YEAR: "2021"
+  STORAGE_PATH: /storage
+
+x-average: &average
+  build:
+    context: ./src
+    dockerfile: average/Dockerfile
+  depends_on:
+    rabbitmq:
+      condition: service_healthy
+    filter_average_0:
+      condition: service_healthy
+    filter_average_1:
+      condition: service_healthy
+  environment:
+    <<: *average-env
+    ID: "0"
+  healthcheck: *healthcheck
+
+x-filter-average-env: &filter-average-env
+  <<: *worker-env
+  INPUT_EXCHANGE: filter_average
+  OUTPUT_EXCHANGE: results
+  AVERAGE_AMOUNT: "2"
+  FILTER_YEAR_AMOUNT: "2"
+  YEAR: "2020"
+  STORAGE_PATH: /storage
+
+x-filter-average: &filter-average
+  build:
+    context: ./src
+    dockerfile: filter-average/Dockerfile
+  depends_on:
+    rabbitmq:
+      condition: service_healthy
+  environment:
+    <<: *filter-average-env
+    ID: "0"
+  healthcheck: *healthcheck
+
 services:
   rabbitmq:
     build:
@@ -23,7 +290,11 @@ services:
         condition: service_healthy
       filter_0:
         condition: service_healthy
+      filter_1:
+        condition: service_healthy
       splitter_0:
+        condition: service_healthy
+      splitter_1:
         condition: service_healthy
     environment:
       MOM_HOST: rabbitmq
@@ -33,9 +304,9 @@ services:
       HANDLER_HOST: handler
       HANDLER_PORT: "5679"
       FILTER_PREFIX: filter
-      FILTER_AMOUNT: "1"
+      FILTER_AMOUNT: "2"
       SPLITTER_PREFIX: splitter
-      SPLITTER_AMOUNT: "1"
+      SPLITTER_AMOUNT: "2"
 
   handler:
     depends_on:
@@ -50,224 +321,108 @@ services:
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: "5679"
       INPUT_EXCHANGE: results
-      QUERY_1_REPLICAS: "1"
-      QUERY_2_REPLICAS: "1"
-      QUERY_3_REPLICAS: "1"
+      QUERY_1_REPLICAS: "2"
+      QUERY_2_REPLICAS: "2"
+      QUERY_3_REPLICAS: "2"
       QUERY_4_REPLICAS: "1"
-      QUERY_5_REPLICAS: "1"
+      QUERY_5_REPLICAS: "2"
 
   client_0:
-    build:
-      context: ./src
-      dockerfile: client/Dockerfile
-    depends_on:
-      gateway:
-        condition: service_started
-      handler:
-        condition: service_started
-      filter_0:
-        condition: service_healthy
-      image_getter_0:
-        condition: service_healthy
-      splitter_0:
-        condition: service_healthy
-      filter_language_0:
-        condition: service_healthy
-      aggregation_0:
-        condition: service_healthy
-      join:
-        condition: service_healthy
-      filter_year_0:
-        condition: service_healthy
-      average_0:
-        condition: service_healthy
-      filter_average_0:
-        condition: service_healthy
+    profiles: ["dos"]
+    <<: *cliente
     environment:
-      PYTHONUNBUFFERED: "1"
-      GATEWAY_HOST: gateway
-      GATEWAY_PORT: "5678"
+      <<: *cliente-env
       INPUT_PATH: /datasets/wikipedia-1000.jsonl
       OUTPUT_PATH: /output/output_0.bin
-      CONNECTION_TIMEOUT: "10"
-    volumes:
-      - ./datasets:/datasets:ro
-      - ./output:/output
 
   client_1:
-    build:
-      context: ./src
-      dockerfile: client/Dockerfile
-    depends_on:
-      gateway:
-        condition: service_started
-      handler:
-        condition: service_started
-      filter_0:
-        condition: service_healthy
-      image_getter_0:
-        condition: service_healthy
-      splitter_0:
-        condition: service_healthy
-      filter_language_0:
-        condition: service_healthy
-      aggregation_0:
-        condition: service_healthy
-      join:
-        condition: service_healthy
-      filter_year_0:
-        condition: service_healthy
-      average_0:
-        condition: service_healthy
-      filter_average_0:
-        condition: service_healthy
+    profiles: ["dos"]
+    <<: *cliente
     environment:
-      PYTHONUNBUFFERED: "1"
-      GATEWAY_HOST: gateway
-      GATEWAY_PORT: "5678"
+      <<: *cliente-env
       INPUT_PATH: /datasets/wikipedia-1000.jsonl
       OUTPUT_PATH: /output/output_1.bin
-      CONNECTION_TIMEOUT: "10"
-    volumes:
-      - ./datasets:/datasets:ro
-      - ./output:/output
+
+  client_v1_a:
+    <<: *cliente
+    environment:
+      <<: *cliente-env
+      INPUT_PATH: /datasets/wikipedia-1000.jsonl
+      OUTPUT_PATH: /output/v1_cliente_a.bin
+
+  client_v1_b:
+    <<: *cliente
+    environment:
+      <<: *cliente-env
+      INPUT_PATH: /datasets/wikipedia-1000.jsonl
+      OUTPUT_PATH: /output/v1_cliente_b.bin
+
+  client_v2_a:
+    <<: *cliente
+    environment:
+      <<: *cliente-env
+      INPUT_PATH: /datasets/wikipedia-1000-v2.jsonl
+      OUTPUT_PATH: /output/v2_cliente_a.bin
+
+  client_v2_b:
+    <<: *cliente
+    environment:
+      <<: *cliente-env
+      INPUT_PATH: /datasets/wikipedia-1000-v2.jsonl
+      OUTPUT_PATH: /output/v2_cliente_b.bin
 
   filter_0:
-    build:
-      context: ./src
-      dockerfile: filter/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      image_getter_0:
-        condition: service_healthy
+    <<: *filter
+
+  filter_1:
+    <<: *filter
     environment:
-      READINESS_FILE: /tmp/worker-ready
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
-      ID: "0"
-      INPUT_EXCHANGE: filter
-      OUTPUT_EXCHANGE_1: results
-      OUTPUT_EXCHANGE_2: image_getter
-      IMAGE_GETTER_PREFIX: image_getter
-      IMAGE_GETTER_AMOUNT: "1"
-      LANGUAGE: en
-      SECTIONS: Biography,Biographie
-      YEAR: "2020"
-    healthcheck:
-      test: ["CMD", "test", "-f", "/tmp/worker-ready"]
-      interval: 2s
-      timeout: 1s
-      retries: 30
-      start_period: 10s
+      <<: *filter-env
+      ID: "1"
 
   image_getter_0:
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    build:
-      context: ./src
-      dockerfile: image-getter/Dockerfile
+    <<: *image-getter
+
+  image_getter_1:
+    <<: *image-getter
     environment:
-      READINESS_FILE: /tmp/worker-ready
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
-      ID: "0"
-      INPUT_EXCHANGE: image_getter
-      OUTPUT_EXCHANGE: results
-      FILTER_YEAR_PLUS_AMOUNT: "1"
-    healthcheck:
-      test: ["CMD", "test", "-f", "/tmp/worker-ready"]
-      interval: 2s
-      timeout: 1s
-      retries: 30
-      start_period: 10s
+      <<: *image-getter-env
+      ID: "1"
 
   splitter_0:
-    build:
-      context: ./src
-      dockerfile: splitter/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      filter_language_0:
-        condition: service_healthy
-      aggregation_0:
-        condition: service_healthy
-      filter_year_0:
-        condition: service_healthy
+    <<: *splitter
+
+  splitter_1:
+    <<: *splitter
     environment:
-      READINESS_FILE: /tmp/worker-ready
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
-      ID: "0"
-      INPUT_EXCHANGE: splitter
-      EXCHANGE_QUERY_3: filter_language
-      EXCHANGE_QUERY_4: aggregation
-      EXCHANGE_QUERY_5: filter_year
-      STOPWORDS_PATH: /stopwords
-      AGGREGATION_AMOUNT: "1"
-      FILTER_YEAR_AMOUNT: "1"
-      FILTER_LANGUAGE_AMOUNT: "1"
-    healthcheck:
-      test: ["CMD", "test", "-f", "/tmp/worker-ready"]
-      interval: 2s
-      timeout: 1s
-      retries: 30
-      start_period: 10s
+      <<: *splitter-env
+      ID: "1"
 
   filter_language_0:
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    build:
-      context: ./src
-      dockerfile: filter-language/Dockerfile
-    environment:
-      READINESS_FILE: /tmp/worker-ready
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
-      ID: "0"
-      INPUT_EXCHANGE: filter_language
-      OUTPUT_EXCHANGE: results
-      SPLITTER_AMOUNT: "1"
-      STORAGE_PATH: /storage
+    <<: *filter-language
     volumes:
-      - filter_language_storage:/storage
-    healthcheck:
-      test: ["CMD", "test", "-f", "/tmp/worker-ready"]
-      interval: 2s
-      timeout: 1s
-      retries: 30
-      start_period: 10s
+      - filter_language_storage_0:/storage
+
+  filter_language_1:
+    <<: *filter-language
+    environment:
+      <<: *filter-language-env
+      ID: "1"
+    volumes:
+      - filter_language_storage_1:/storage
 
   aggregation_0:
-    build:
-      context: ./src
-      dockerfile: aggregation/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      join:
-        condition: service_healthy
-    environment:
-      READINESS_FILE: /tmp/worker-ready
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
-      ID: "0"
-      INPUT_EXCHANGE: aggregation
-      OUTPUT_QUEUE: join_queue
-      SPLITTER_AMOUNT: "1"
-      TOP_SIZE: "20"
-      STORAGE_PATH: /storage
+    <<: *aggregation
     volumes:
-      - aggregation_storage:/storage
-    healthcheck:
-      test: ["CMD", "test", "-f", "/tmp/worker-ready"]
-      interval: 2s
-      timeout: 1s
-      retries: 30
-      start_period: 10s
+      - aggregation_storage_0:/storage
+
+  aggregation_1:
+    <<: *aggregation
+    environment:
+      <<: *aggregation-env
+      ID: "1"
+    volumes:
+      - aggregation_storage_1:/storage
 
   join:
     depends_on:
@@ -282,111 +437,61 @@ services:
       PYTHONUNBUFFERED: "1"
       INPUT_QUEUE: join_queue
       OUTPUT_EXCHANGE: results
-      AGGREGATION_AMOUNT: "1"
+      AGGREGATION_AMOUNT: "2"
       TOP_SIZE: "20"
-    healthcheck:
-      test: ["CMD", "test", "-f", "/tmp/worker-ready"]
-      interval: 2s
-      timeout: 1s
-      retries: 30
-      start_period: 10s
+    healthcheck: *healthcheck
 
   filter_year_0:
-    build:
-      context: ./src
-      dockerfile: filter-year/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      average_0:
-        condition: service_healthy
-      filter_average_0:
-        condition: service_healthy
-    environment:
-      READINESS_FILE: /tmp/worker-ready
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
-      ID: "0"
-      INPUT_EXCHANGE: filter_year
-      AVERAGE_EXCHANGE: average
-      AVERAGE_AMOUNT: "1"
-      FILTER_AVERAGE_EXCHANGE: filter_average
-      FILTER_AVERAGE_AMOUNT: "1"
-      SPLITTER_AMOUNT: "1"
-      YEAR: "2020"
-      STORAGE_PATH: /storage
+    <<: *filter-year
     volumes:
-      - filter_year_storage:/storage
-    healthcheck:
-      test: ["CMD", "test", "-f", "/tmp/worker-ready"]
-      interval: 2s
-      timeout: 1s
-      retries: 30
-      start_period: 10s
+      - filter_year_storage_0:/storage
+
+  filter_year_1:
+    <<: *filter-year
+    environment:
+      <<: *filter-year-env
+      ID: "1"
+    volumes:
+      - filter_year_storage_1:/storage
 
   average_0:
-    build:
-      context: ./src
-      dockerfile: average/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      filter_average_0:
-        condition: service_healthy
-    environment:
-      READINESS_FILE: /tmp/worker-ready
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
-      ID: "0"
-      AVERAGE_PREFIX: average
-      INPUT_EXCHANGE: average
-      OUTPUT_EXCHANGE: filter_average
-      FILTER_AVERAGE_AMOUNT: "1"
-      YEAR: "2021"
-      STORAGE_PATH: /storage
+    <<: *average
     volumes:
-      - average_storage:/storage
-    healthcheck:
-      test: ["CMD", "test", "-f", "/tmp/worker-ready"]
-      interval: 2s
-      timeout: 1s
-      retries: 30
-      start_period: 10s
+      - average_storage_0:/storage
+
+  average_1:
+    <<: *average
+    environment:
+      <<: *average-env
+      ID: "1"
+    volumes:
+      - average_storage_1:/storage
 
   filter_average_0:
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    build:
-      context: ./src
-      dockerfile: filter-average/Dockerfile
-    environment:
-      READINESS_FILE: /tmp/worker-ready
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
-      ID: "0"
-      INPUT_EXCHANGE: filter_average
-      OUTPUT_EXCHANGE: results
-      AVERAGE_AMOUNT: "1"
-      FILTER_YEAR_AMOUNT: "1"
-      YEAR: "2020"
-      STORAGE_PATH: /storage
+    <<: *filter-average
     volumes:
-      - filter_average_storage:/storage
-    healthcheck:
-      test: ["CMD", "test", "-f", "/tmp/worker-ready"]
-      interval: 2s
-      timeout: 1s
-      retries: 30
-      start_period: 10s
+      - filter_average_storage_0:/storage
+
+  filter_average_1:
+    <<: *filter-average
+    environment:
+      <<: *filter-average-env
+      ID: "1"
+    volumes:
+      - filter_average_storage_1:/storage
 
 networks:
   default:
     name: tp-distri-grupal-network
 
 volumes:
-  aggregation_storage:
-  filter_language_storage:
-  filter_year_storage:
-  average_storage:
-  filter_average_storage:
+  aggregation_storage_0:
+  aggregation_storage_1:
+  filter_language_storage_0:
+  filter_language_storage_1:
+  filter_year_storage_0:
+  filter_year_storage_1:
+  average_storage_0:
+  average_storage_1:
+  filter_average_storage_0:
+  filter_average_storage_1:

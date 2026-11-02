@@ -53,12 +53,18 @@ class FilterLanguage:
         elif message_type == MsgType.END_OF_RECORDS:
             self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
             if self.eof_by_client[client_id] == SPLITTER_AMOUNT:
-                self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q3_RESULT), routing_key=client_id) 
+                self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q3_RESULT), routing_key=client_id)
+                self._release_client(client_id)
 
         else:
             nack()
             return
         ack()
+
+    def _release_client(self, client_id):
+        self.eof_by_client.pop(client_id, None)
+        self.words_by_client.pop(client_id, None)
+        logging.debug("Released state for client %s", client_id)
 
     def sigterm_handler(self, signum, frame):
         if self.end_event.is_set():

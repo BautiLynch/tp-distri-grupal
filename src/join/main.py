@@ -54,11 +54,15 @@ class JoinFilter:
         ]
 
         self.output_exchange.send_to(serialize_msg(MsgType.Q4_RESULT, client_id, result), routing_key=client_id)
-        self.top_by_client[client_id] = {}
-        self.agg_by_client[client_id] = {}
-
         self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q4_RESULT), routing_key=client_id)
-        
+
+        self._release_client(client_id)
+
+    def _release_client(self, client_id):
+        self.agg_by_client.pop(client_id, None)
+        self.top_by_client.pop(client_id, None)
+        logging.debug("Released state for client %s", client_id)
+
     def process_message(self, message, ack, nack):
         message_type, client_id, fields = deserialize_msg(message)
         if message_type == MsgType.Q4_RESULT:

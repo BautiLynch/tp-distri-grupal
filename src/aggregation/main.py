@@ -41,9 +41,13 @@ class AggregationFilter:
                 self.words_by_client.get(client_id, {}).items(),
                 key=lambda item: item[1],
             )
-            self.words_by_client[client_id] = {}
-            self.output_queue.send(serialize_msg(MsgType.Q4_RESULT, client_id, top_parcial)) 
+            self.output_queue.send(serialize_msg(MsgType.Q4_RESULT, client_id, top_parcial))
+            self._release_client(client_id)
 
+    def _release_client(self, client_id):
+        self.eof_by_client.pop(client_id, None)
+        self.words_by_client.pop(client_id, None)
+        logging.debug("Released state for client %s", client_id)
 
     def process_message(self, message, ack, nack):
         message_type, client_id, fields = deserialize_msg(message)
