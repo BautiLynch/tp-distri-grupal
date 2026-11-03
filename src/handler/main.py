@@ -149,6 +149,11 @@ def handle_sigterm(server_socket, client_dict, worker_pids, sigterm_received):
             logging.debug("Worker %s already stopped", worker_pid)
 
 
+def initialize_worker():
+    logging.basicConfig(level=logging.INFO, force=True)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+
 def main():
     logging.basicConfig(level=logging.INFO)
     with multiprocessing.Manager() as manager:
@@ -157,8 +162,7 @@ def main():
         sigterm_received = manager.Value("c_short", 0)
         with multiprocessing.Pool(
             processes=os.process_cpu_count(),
-            initializer=signal.signal,
-            initargs=(signal.SIGTERM, signal.SIG_IGN),
+            initializer=initialize_worker,
         ) as processes_pool:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
                 server_socket.bind((SERVER_HOST, SERVER_PORT))

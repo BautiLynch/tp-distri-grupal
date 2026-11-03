@@ -62,6 +62,7 @@ class Client:
             self._check_stopping()
             try:
                 connection = socket.create_connection(address, self.connection_timeout)
+                logging.info("Connected to %s:%s", *address)
                 break
             except OSError as error:
                 self._check_stopping()
