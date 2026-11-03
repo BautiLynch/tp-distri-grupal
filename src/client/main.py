@@ -116,6 +116,7 @@ class Client:
             # expect_message(connection, external.MsgType.ACK)
         self._check_stopping()
         external.send_msg(connection, external.MsgType.END_OF_RECORDS)
+        logging.info("Client sent all records")
         # expect_message(connection, external.MsgType.ACK)
 
     def _validate_output(self, source):
