@@ -31,7 +31,6 @@ class Splitter:
 
         self.stopwords = self._load_stopwords("english") | self._load_stopwords("french")
 
-        self.word_count = {}
         self.end_event = threading.Event()
         signal.signal(signal.SIGTERM, self.sigterm_handler)
 
@@ -45,21 +44,20 @@ class Splitter:
     def _split_and_send(self, client_id, article):
         url, language, date_modified, abstract = article
         words = re.findall(r"\w+", abstract.lower())
+        word_count = {}
 
         for word in words:
             if word in self.stopwords or word.isdecimal():
                 continue
-            self.word_count[word] = self.word_count.get(word, 0) + 1
+            word_count[word] = word_count.get(word, 0) + 1
 
-        for word, amount in self.word_count.items():
+        for word, amount in word_count.items():
             key = hashing.get_hash_key(f"{client_id}_{word}", FILTER_LANGUAGE_AMOUNT)
             self.output_exchange.send_to(
                 serialize_msg(MsgType.SPLIT_WORD, client_id,
                               word, language, url, date_modified, amount),
                 routing_key=key,
             )
-
-        self.word_count.clear()
 
     def process_message(self, message, ack, nack):
         try:
@@ -74,7 +72,6 @@ class Splitter:
                 raise ValueError(f"Unexpected splitter message type: {message_type}")
             
         except Exception:
-            self.word_count.clear()
             logging.exception("Could not process splitter input")
             nack()
             return
