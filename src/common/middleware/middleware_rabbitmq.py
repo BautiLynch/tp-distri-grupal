@@ -1,8 +1,6 @@
 import logging
 import os
 import pika
-import time
-from common.message_protocol.internal import MsgType, HEADER_SIZE
 from .middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
 from .middleware import (
     MessageMiddlewareMessageError,
@@ -32,17 +30,22 @@ class _MessageMiddlewareRabbitMQBase:
             logging.exception("MOM initialization failed %s", self._log_context())
             raise MessageMiddlewareMessageError
 
+    def _log_context(self):
+        return "host=%s id=%s pid=%s exchange=%s queue=%s" % (
+            self.host, os.environ.get("ID", "-"), os.getpid(),
+            self.exchange or "<default>", self.queue_name,
+        )
+
     def _declare_topology(self):
         """Cada subclase define cómo arma su queue/exchange."""
         raise NotImplementedError
 
     def send(self, message):
         try:
-            with self._publish_lock:
-                for routing_key in self.routing_keys:
-                    self.chan.basic_publish(
-                        exchange=self.exchange, routing_key=routing_key, body=message
-                    )
+            for routing_key in self.routing_keys:
+                self.chan.basic_publish(
+                    exchange=self.exchange, routing_key=routing_key, body=message
+                )
         except AMQPConnectionError:
             raise MessageMiddlewareDisconnectedError
         except AMQPError:
@@ -143,10 +146,9 @@ class MessageMiddlewareExchangeRabbitMQ(_MessageMiddlewareRabbitMQBase, MessageM
             routing_key = str(routing_key)
 
         try:
-            with self._publish_lock:
-                self.chan.basic_publish(
-                    exchange=self.exchange, routing_key=routing_key, body=message
-                )
+            self.chan.basic_publish(
+                exchange=self.exchange, routing_key=routing_key, body=message
+            )
         except AMQPConnectionError:
             raise MessageMiddlewareDisconnectedError
         except AMQPError:
