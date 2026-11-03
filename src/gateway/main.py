@@ -54,12 +54,13 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
                     message_protocol.internal.MsgType.FILTER_ARTICLE,
                     client_id, *filtered_article,
                 )
-                split = message_protocol.internal.serialize_msg(
-                    message_protocol.internal.MsgType.SPLITTER_ARTICLE,
-                    client_id, *splitter_article,
-                )
                 filter_exchange.send_to(filtered, str(article_index % FILTER_AMOUNT))
-                splitter_exchange.send_to(split, str(article_index % SPLITTER_AMOUNT))
+                if splitter_article is not None:
+                    split = message_protocol.internal.serialize_msg(
+                        message_protocol.internal.MsgType.SPLITTER_ARTICLE,
+                        client_id, *splitter_article,
+                    )
+                    splitter_exchange.send_to(split, str(article_index % SPLITTER_AMOUNT))
                 article_index += 1
             else:
                 end_of_records = message_protocol.internal.serialize_msg(

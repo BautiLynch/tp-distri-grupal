@@ -15,6 +15,7 @@ class MsgType(IntEnum):
     GET_IMAGE = auto()
     FILTER_ARTICLE = auto()
     SPLIT_WORD = auto()
+    BASELINE_END = auto()
 
 
 UINT32_SIZE = 4
@@ -259,6 +260,7 @@ def _deserialize_empty(payload):
 
 
 RECV_MSG_HANDLERS = {
+    MsgType.BASELINE_END: _deserialize_empty,
     MsgType.SPLIT_WORD: _deserialize_split_word,
     MsgType.FILTER_ARTICLE: _deserialize_filter_article,
     MsgType.SPLITTER_ARTICLE: _deserialize_splitter_article,
@@ -276,6 +278,7 @@ RECV_MSG_HANDLERS = {
 }
 
 SEND_MSG_HANDLERS = {
+    MsgType.BASELINE_END: _serialize_empty,
     MsgType.SPLIT_WORD: _serialize_split_word,
     MsgType.FILTER_ARTICLE: _serialize_filter_article,
     MsgType.SPLITTER_ARTICLE: _serialize_splitter_article,

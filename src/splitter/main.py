@@ -1,5 +1,6 @@
 import os
 import logging
+import re
 import signal
 import threading
 
@@ -28,8 +29,7 @@ class Splitter:
             MOM_HOST, OUTPUT_EXCHANGE, [f"{index}" for index in range(FILTER_LANGUAGE_AMOUNT)], consume=False
         )
 
-        self.en_stopwords = self._load_stopwords("english")
-        self.fr_stopwords = self._load_stopwords("french")
+        self.stopwords = self._load_stopwords("english") | self._load_stopwords("french")
 
         self.word_count = {}
         self.end_event = threading.Event()
@@ -38,23 +38,21 @@ class Splitter:
     def _load_stopwords(self, language):
         file_path = os.path.join(STOPWORDS_PATH, f"{language}.txt")
         with open(file_path, "r", encoding="utf-8") as file:
-            stopwords_list = [line.strip() for line in file.readlines()]
+            stopwords_list = [line.strip() for line in file]
 
         return set(stopwords_list)
 
     def _split_and_send(self, client_id, article):
         url, language, date_modified, abstract = article
-        words = abstract.split(" ")
+        words = re.findall(r"\w+", abstract.lower())
 
         for word in words:
-            if self._is_stopword(word, language):
+            if word in self.stopwords or word.isdecimal():
                 continue
-
             self.word_count[word] = self.word_count.get(word, 0) + 1
 
         for word, amount in self.word_count.items():
             key = hashing.get_hash_key(f"{client_id}_{word}", FILTER_LANGUAGE_AMOUNT)
-
             self.output_exchange.send_to(
                 serialize_msg(MsgType.SPLIT_WORD, client_id,
                               word, language, url, date_modified, amount),
@@ -62,14 +60,6 @@ class Splitter:
             )
 
         self.word_count.clear()
-
-    def _is_stopword(self, word, language):
-        if language == "en":
-            return word in self.en_stopwords
-        elif language == "fr":
-            return word in self.fr_stopwords
-        else:
-            return False
 
     def process_message(self, message, ack, nack):
         try:
@@ -84,6 +74,7 @@ class Splitter:
                 raise ValueError(f"Unexpected splitter message type: {message_type}")
             
         except Exception:
+            self.word_count.clear()
             logging.exception("Could not process splitter input")
             nack()
             return

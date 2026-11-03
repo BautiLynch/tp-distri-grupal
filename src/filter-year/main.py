@@ -56,7 +56,9 @@ class FilterYear:
             self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
 
             if self.eof_by_client[client_id] == SPLITTER_AMOUNT:
-                self.output_exchange_filter_average.send(message)
+                self.output_exchange_filter_average.send(
+                    serialize_msg(MsgType.BASELINE_END, client_id)
+                )
                 self.output_exchange_average.send(message)
                 self._release_client(client_id)
 
