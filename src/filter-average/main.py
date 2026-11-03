@@ -22,10 +22,10 @@ class FilterAverage:
 
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [ID]
+            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ( 
-            MOM_HOST, OUTPUT_EXCHANGE, []
+            MOM_HOST, OUTPUT_EXCHANGE, [], consume=False
         )
 
         self.eof_by_client = {}
@@ -44,6 +44,8 @@ class FilterAverage:
             amount_words = sum(words_by_url.values())
             self.average_by_client[client_id] = amount_words / amount_urls if amount_urls > 0 else 0
 
+            logging.info(f"Average for client {client_id} calculated: {self.average_by_client[client_id]}")
+            logging.info(f"Processing pending messages for client {client_id}: length {len(self.pending_messages_by_client.get(client_id, []))}")
             for url, amount_words in self.pending_messages_by_client.get(client_id, []):
                 self._process_abstract(client_id, url, amount_words)
 
@@ -57,12 +59,9 @@ class FilterAverage:
         self.words_by_client.pop(client_id, None)
         self.pending_messages_by_client.pop(client_id, None)
         self.average_by_client.pop(client_id, None)
-        logging.debug("Released state for client %s", client_id)
 
     def _process_abstract(self, client_id, url, amount_words):
         if self.average_by_client.get(client_id) is None:
-            logging.warning(f"Average for client {client_id} not calculated yet")
-
             self.pending_messages_by_client.setdefault(client_id, []).append((url, amount_words))
             return
         

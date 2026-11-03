@@ -57,9 +57,22 @@ class Client:
         if self.stopping.is_set():
             raise InterruptedError("Client stopped")
 
-    def _connect(self, address):
-        self._check_stopping()
-        connection = socket.create_connection(address, self.connection_timeout)
+    def _connect(self, address, attempts=1):
+        for attempt in range(1, attempts + 1):
+            self._check_stopping()
+            try:
+                connection = socket.create_connection(address, self.connection_timeout)
+                break
+            except OSError as error:
+                self._check_stopping()
+                if attempt == attempts:
+                    raise
+                delay = 2 ** (attempt - 1)
+                logging.warning(
+                    "Connection to %s:%s failed (attempt %s/%s): %s; retrying in %ss",
+                    *address, attempt, attempts, error, delay,
+                )
+                self.stopping.wait(delay)
         connection.settimeout(None)
         with self.connections_lock:
             self.connections.append(connection)
@@ -100,10 +113,10 @@ class Client:
         for line in source:
             self._check_stopping()
             external.send_msg(connection, external.MsgType.ARTICLE, line)
-            expect_message(connection, external.MsgType.ACK)
+            # expect_message(connection, external.MsgType.ACK)
         self._check_stopping()
         external.send_msg(connection, external.MsgType.END_OF_RECORDS)
-        expect_message(connection, external.MsgType.ACK)
+        # expect_message(connection, external.MsgType.ACK)
 
     def _validate_output(self, source):
         try:
@@ -119,7 +132,7 @@ class Client:
             self._validate_output(source)
             with open(self.output_path, "wb") as output:
                 try:
-                    gateway = self._connect(self.gateway_address)
+                    gateway = self._connect(self.gateway_address, attempts=3)
                     client_id = expect_message(gateway, external.MsgType.CLIENT_ID)
                     handler_address = expect_message(gateway, external.MsgType.HANDLER_ADDRESS)
                     handler = self._connect(handler_address)

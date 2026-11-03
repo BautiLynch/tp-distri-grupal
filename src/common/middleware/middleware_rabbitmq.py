@@ -1,8 +1,6 @@
 import logging
 import os
-from pathlib import Path
 import pika
-import threading
 from .middleware import MessageMiddlewareQueue, MessageMiddlewareExchange
 from .middleware import (
     MessageMiddlewareMessageError,
@@ -21,19 +19,22 @@ class _MessageMiddlewareRabbitMQBase:
         self.routing_keys = routing_keys
         self._consuming = False
         self.queue_name = None
-        self._publish_lock = threading.Lock()
-        readiness_file = os.environ.get("READINESS_FILE")
-        self._readiness_file = Path(readiness_file) if readiness_file else None
-        if self._readiness_file is not None:
-            self._readiness_file.unlink(missing_ok=True)
         try:
-            self.conn = pika.BlockingConnection(pika.ConnectionParameters(host=host))
+            self.conn = pika.BlockingConnection(pika.ConnectionParameters(host=host, heartbeat=0))
             self.chan = self.conn.channel()
             self._declare_topology()
         except AMQPConnectionError:
+            logging.exception("MOM connection failed %s", self._log_context())
             raise MessageMiddlewareDisconnectedError
         except AMQPError:
+            logging.exception("MOM initialization failed %s", self._log_context())
             raise MessageMiddlewareMessageError
+
+    def _log_context(self):
+        return "host=%s id=%s pid=%s exchange=%s queue=%s" % (
+            self.host, os.environ.get("ID", "-"), os.getpid(),
+            self.exchange or "<default>", self.queue_name,
+        )
 
     def _declare_topology(self):
         """Cada subclase define cómo arma su queue/exchange."""
@@ -41,11 +42,10 @@ class _MessageMiddlewareRabbitMQBase:
 
     def send(self, message):
         try:
-            with self._publish_lock:
-                for routing_key in self.routing_keys:
-                    self.chan.basic_publish(
-                        exchange=self.exchange, routing_key=routing_key, body=message
-                    )
+            for routing_key in self.routing_keys:
+                self.chan.basic_publish(
+                    exchange=self.exchange, routing_key=routing_key, body=message
+                )
         except AMQPConnectionError:
             raise MessageMiddlewareDisconnectedError
         except AMQPError:
@@ -68,17 +68,15 @@ class _MessageMiddlewareRabbitMQBase:
                 on_message_callback=_pika_callback,
                 auto_ack=False,
             )
-            # basic_consume retorna cuando RabbitMQ confirma el consumidor.
-            if self._readiness_file is not None:
-                self._readiness_file.touch()
             self.chan.start_consuming()
         except AMQPConnectionError:
+            logging.exception("MOM consumer disconnected %s", self._log_context())
             raise MessageMiddlewareDisconnectedError
         except AMQPError:
+            logging.exception("MOM consumer failed %s", self._log_context())
             raise MessageMiddlewareMessageError
         finally:
-            if self._readiness_file is not None:
-                self._readiness_file.unlink(missing_ok=True)
+            logging.info("MOM consumer stopped %s", self._log_context())
 
     def stop_consuming(self):
         if not self._consuming:
@@ -122,15 +120,18 @@ class MessageMiddlewareQueueRabbitMQ(_MessageMiddlewareRabbitMQBase, MessageMidd
 
 
 class MessageMiddlewareExchangeRabbitMQ(_MessageMiddlewareRabbitMQBase, MessageMiddlewareExchange):
-    def __init__(self, host, exchange_name, routing_keys):
+    def __init__(self, host, exchange_name, routing_keys, *, consume):
+        self.consume = consume
         super().__init__(host, exchange=exchange_name, routing_keys=routing_keys)
 
     def _declare_topology(self):
         self.chan.exchange_declare(
             exchange=self.exchange, exchange_type="direct", durable=True
         )
-        if not self.routing_keys:
+
+        if not self.consume:
             return
+
         result = self.chan.queue_declare(queue="", exclusive=True)
         self.queue_name = result.method.queue
         for routing_key in self.routing_keys:
@@ -143,11 +144,11 @@ class MessageMiddlewareExchangeRabbitMQ(_MessageMiddlewareRabbitMQBase, MessageM
     def send_to(self, message, routing_key):
         if isinstance(routing_key, int):
             routing_key = str(routing_key)
+
         try:
-            with self._publish_lock:
-                self.chan.basic_publish(
-                    exchange=self.exchange, routing_key=routing_key, body=message
-                )
+            self.chan.basic_publish(
+                exchange=self.exchange, routing_key=routing_key, body=message
+            )
         except AMQPConnectionError:
             raise MessageMiddlewareDisconnectedError
         except AMQPError:

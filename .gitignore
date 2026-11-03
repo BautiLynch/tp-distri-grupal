@@ -52,6 +52,7 @@ tmp/
 temp/
 tools/
 output/
+datasets/
 *.tmp
 
 .DS_Store

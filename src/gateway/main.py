@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 import multiprocessing
 import os
 import signal
@@ -36,10 +36,10 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
             HANDLER_HOST, HANDLER_PORT,
         )
         filter_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, FILTER_PREFIX, [f"{index}" for index in range(FILTER_AMOUNT)]
+            MOM_HOST, FILTER_PREFIX, [f"{index}" for index in range(FILTER_AMOUNT)], consume=False
         )
         splitter_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, SPLITTER_PREFIX, [f"{index}" for index in range(SPLITTER_AMOUNT)]
+            MOM_HOST, SPLITTER_PREFIX, [f"{index}" for index in range(SPLITTER_AMOUNT)], consume=False
         )
         while True:
             message_type, article = message_protocol.external.recv_msg(client_socket)
@@ -69,9 +69,9 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
                 filter_exchange.send(end_of_records)
                 splitter_exchange.send(end_of_records)
                     
-            message_protocol.external.send_msg(
-                client_socket, message_protocol.external.MsgType.ACK # TODO: Esta bien que el cliente necesite un ACK? 
-            )
+            # message_protocol.external.send_msg(
+            #     client_socket, message_protocol.external.MsgType.ACK # TODO: Esta bien que el cliente necesite un ACK? 
+            # )
             if message_type == message_protocol.external.MsgType.END_OF_RECORDS:
                 break
 
@@ -90,7 +90,7 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
         try:
             client_socket.shutdown(socket.SHUT_RDWR)
         except socket.error as e:
-            logging.debug("Client %s already disconnected: %s", client_id, e)
+            pass
         client_socket.close()
         client_dict.pop(client_id, None)
 
@@ -101,7 +101,7 @@ def handle_sigterm(server_socket, client_dict, sigterm_received): # TODO: Se sup
         try:
             connection.shutdown(socket.SHUT_RDWR)
         except socket.error as e:
-            logging.debug("Socket already disconnected during shutdown: %s", e)
+            pass
 
 
 def main():
@@ -120,7 +120,6 @@ def main():
                         server_socket, client_dict, sigterm_received
                     ),
                 )
-                logging.info("Listening to connections")
                 client_id = 0
                 try:
                     while True:

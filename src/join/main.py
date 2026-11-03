@@ -20,7 +20,7 @@ class JoinFilter:
             MOM_HOST, INPUT_QUEUE
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, OUTPUT_EXCHANGE, []
+            MOM_HOST, OUTPUT_EXCHANGE, [], consume=False
         )
 
         self.agg_by_client = {} # Contador
@@ -61,7 +61,6 @@ class JoinFilter:
     def _release_client(self, client_id):
         self.agg_by_client.pop(client_id, None)
         self.top_by_client.pop(client_id, None)
-        logging.debug("Released state for client %s", client_id)
 
     def process_message(self, message, ack, nack):
         message_type, client_id, fields = deserialize_msg(message)

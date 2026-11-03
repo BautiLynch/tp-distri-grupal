@@ -23,10 +23,10 @@ class Average:
 
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [ID]
+            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, OUTPUT_EXCHANGE, [f"{index}" for index in range(FILTER_AVERAGE_AMOUNT)]
+            MOM_HOST, OUTPUT_EXCHANGE, [f"{index}" for index in range(FILTER_AVERAGE_AMOUNT)], consume=False
         )
 
         self.urls_by_client = {}
@@ -55,7 +55,6 @@ class Average:
     def _release_client(self, client_id):
         self.eof_by_client.pop(client_id, None)
         self.urls_by_client.pop(client_id, None)
-        logging.debug("Released state for client %s", client_id)
 
     def process_message(self, message, ack, nack):
         message_type, client_id, fields = deserialize_msg(message)

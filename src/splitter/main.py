@@ -9,29 +9,23 @@ from common.message_protocol.internal import MsgType, serialize_msg, deserialize
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
-EXCHANGE_QUERY_3 = os.environ["EXCHANGE_QUERY_3"]
-EXCHANGE_QUERY_4 = os.environ["EXCHANGE_QUERY_4"]
-EXCHANGE_QUERY_5 = os.environ["EXCHANGE_QUERY_5"]
+OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 
 STOPWORDS_PATH = os.environ.get("STOPWORDS_PATH", "stopwords")
 AGGREGATION_AMOUNT = int(os.environ["AGGREGATION_AMOUNT"])
 FILTER_YEAR_AMOUNT = int(os.environ["FILTER_YEAR_AMOUNT"])
 FILTER_LANGUAGE_AMOUNT = int(os.environ["FILTER_LANGUAGE_AMOUNT"])
+if not (AGGREGATION_AMOUNT == FILTER_YEAR_AMOUNT == FILTER_LANGUAGE_AMOUNT >= 1):
+    raise ValueError("aggregation, filter_year y filter_language deben tener la misma cantidad de replicas")
 
 
 class Splitter:
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [ID]
+            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
         )
-        self.output_exchange_3 = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, EXCHANGE_QUERY_3, [f"{index}" for index in range(FILTER_LANGUAGE_AMOUNT)]
-        )
-        self.output_exchange_4 = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, EXCHANGE_QUERY_4, [f"{index}" for index in range(AGGREGATION_AMOUNT)]
-        )
-        self.output_exchange_5 = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, EXCHANGE_QUERY_5, [f"{index}" for index in range(FILTER_YEAR_AMOUNT)]
+        self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, OUTPUT_EXCHANGE, [f"{index}" for index in range(FILTER_LANGUAGE_AMOUNT)], consume=False
         )
 
         self.en_stopwords = self._load_stopwords("english")
@@ -61,32 +55,11 @@ class Splitter:
         for word, amount in self.word_count.items():
             key = hashing.get_hash_key(f"{client_id}_{word}", FILTER_LANGUAGE_AMOUNT)
 
-            self.output_exchange_3.send_to(
-                serialize_msg( # TODO: definir un orden fijo (class?)
-                    MsgType.WORD_LANGUAGE,
-                    client_id, 
-                    word, language, 
-                ), routing_key=key)
-
-            key = hashing.get_hash_key(f"{client_id}_{word}", AGGREGATION_AMOUNT) 
-
-            self.output_exchange_4.send_to(
-                serialize_msg( # TODO: definir un orden fijo (class?)
-                    MsgType.WORD_AMOUNT,
-                    client_id, 
-                    word, 
-                ), routing_key=key)
-
-            key = hashing.get_hash_key(f"{client_id}_{word}", FILTER_YEAR_AMOUNT) 
-            
-            self.output_exchange_5.send_to(
-                serialize_msg( # TODO: definir un orden fijo (class?)
-                    MsgType.WORD_YEAR_AMOUNT,
-                    client_id, 
-                    url, date_modified, amount 
-                ), routing_key=key)
-
-            # TODO: revisar como evitar repetir tanto codigo
+            self.output_exchange.send_to(
+                serialize_msg(MsgType.SPLIT_WORD, client_id,
+                              word, language, url, date_modified, amount),
+                routing_key=key,
+            )
 
         self.word_count.clear()
 
@@ -105,9 +78,7 @@ class Splitter:
                 self._split_and_send(client_id, fields)
 
             elif message_type == MsgType.END_OF_RECORDS:
-                self.output_exchange_3.send(message)
-                self.output_exchange_4.send(message)
-                self.output_exchange_5.send(message) 
+                self.output_exchange.send(message)
 
             else:
                 raise ValueError(f"Unexpected splitter message type: {message_type}")
@@ -119,7 +90,7 @@ class Splitter:
         ack()
 
     def close(self):
-        for mom in [self.input_exchange, self.output_exchange_3, self.output_exchange_4, self.output_exchange_5]:
+        for mom in [self.input_exchange, self.output_exchange]:
             try:
                 mom.close()
             except Exception as e:

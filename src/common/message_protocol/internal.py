@@ -14,6 +14,7 @@ class MsgType(IntEnum):
     SPLITTER_ARTICLE = auto()
     GET_IMAGE = auto()
     FILTER_ARTICLE = auto()
+    SPLIT_WORD = auto()
 
 
 UINT32_SIZE = 4
@@ -93,6 +94,10 @@ def _serialize_word_amount(word):
 def _serialize_word_year_amount(url, date_modified, amount):
     payload = _serialize_texts((url, date_modified))
     return payload + amount.to_bytes(UINT32_SIZE, "big")
+
+
+def _serialize_split_word(word, language, url, date_modified, amount):
+    return _serialize_texts((word, language, url, date_modified)) + amount.to_bytes(UINT32_SIZE, "big")
 
 
 def _serialize_get_image(url, name, image_url):
@@ -193,6 +198,13 @@ def _deserialize_word_year_amount(payload):
     return fields + (amount,)
 
 
+def _deserialize_split_word(payload):
+    fields, offset = _deserialize_texts(payload, 4)
+    amount, offset = _deserialize_uint32(payload, offset)
+    _check_end(payload, offset)
+    return fields + (amount,)
+
+
 def _deserialize_get_image(payload):
     fields, offset = _deserialize_texts(payload, 3)
     _check_end(payload, offset)
@@ -247,6 +259,7 @@ def _deserialize_empty(payload):
 
 
 RECV_MSG_HANDLERS = {
+    MsgType.SPLIT_WORD: _deserialize_split_word,
     MsgType.FILTER_ARTICLE: _deserialize_filter_article,
     MsgType.SPLITTER_ARTICLE: _deserialize_splitter_article,
     MsgType.WORD_LANGUAGE: _deserialize_word_language,
@@ -263,6 +276,7 @@ RECV_MSG_HANDLERS = {
 }
 
 SEND_MSG_HANDLERS = {
+    MsgType.SPLIT_WORD: _serialize_split_word,
     MsgType.FILTER_ARTICLE: _serialize_filter_article,
     MsgType.SPLITTER_ARTICLE: _serialize_splitter_article,
     MsgType.WORD_LANGUAGE: _serialize_word_language,
