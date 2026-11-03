@@ -50,7 +50,6 @@ test-results/
 logs/
 tmp/
 temp/
-tools/
 output/
 datasets/
 *.tmp
