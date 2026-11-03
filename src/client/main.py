@@ -113,10 +113,10 @@ class Client:
         for line in source:
             self._check_stopping()
             external.send_msg(connection, external.MsgType.ARTICLE, line)
-            expect_message(connection, external.MsgType.ACK)
+            # expect_message(connection, external.MsgType.ACK)
         self._check_stopping()
         external.send_msg(connection, external.MsgType.END_OF_RECORDS)
-        expect_message(connection, external.MsgType.ACK)
+        # expect_message(connection, external.MsgType.ACK)
 
     def _validate_output(self, source):
         try:

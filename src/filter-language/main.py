@@ -18,10 +18,10 @@ class FilterLanguage:
 
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [ID]
+            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ( 
-            MOM_HOST, OUTPUT_EXCHANGE, []
+            MOM_HOST, OUTPUT_EXCHANGE, [], consume=False
         )
 
         self.eof_by_client = {}
@@ -32,8 +32,8 @@ class FilterLanguage:
 
     def process_message(self, message, ack, nack):
         message_type, client_id, fields = deserialize_msg(message)
-        if message_type == MsgType.WORD_LANGUAGE:
-            word, language = fields
+        if message_type == MsgType.SPLIT_WORD:
+            word, language, url, date_modified, amount = fields
 
             word_sent = self.words_by_client.get(client_id, {})
             language_sent = word_sent.get(word, set())
@@ -63,7 +63,6 @@ class FilterLanguage:
     def _release_client(self, client_id):
         self.eof_by_client.pop(client_id, None)
         self.words_by_client.pop(client_id, None)
-        logging.debug("Released state for client %s", client_id)
 
     def sigterm_handler(self, signum, frame):
         if self.end_event.is_set():

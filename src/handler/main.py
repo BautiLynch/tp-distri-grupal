@@ -48,12 +48,7 @@ class ClientHandler:
         if self.stopping:
             return
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [str(client_id)]
-        )
-        logging.info(
-            "Client %s has result queue %s",
-            client_id,
-            self.input_exchange.queue_name,
+            MOM_HOST, INPUT_EXCHANGE, [str(client_id)], consume=True
         )
         if self.stopping:
             return
@@ -74,6 +69,11 @@ class ClientHandler:
                 query_name = f"q{query_id}"
                 self.query_end_counts[query_name] += 1
                 if self.query_end_counts[query_name] == QUERY_REPLICAS[query_name]:
+                    logging.info(
+                        "Client %s completed query %s",
+                        self.client_socket.getpeername(),
+                        query_name,
+                    )
                     self.completed_queries.add(query_name)
                 self.finished = len(self.completed_queries) == len(QUERY_REPLICAS)
                 if self.finished:
@@ -169,13 +169,11 @@ def main():
                         server_socket, client_dict, worker_pids, sigterm_received
                     ),
                 )
-                logging.info("Listening to connections on %s:%s", *server_socket.getsockname())
                 connection_id = 0
                 try:
                     while True:
                         try:
                             client_socket, _ = server_socket.accept()
-                            logging.info("A new client has connected")
                             connection_id += 1
                             client_dict[connection_id] = client_socket
                             processes_pool.apply_async(

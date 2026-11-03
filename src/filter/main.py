@@ -22,13 +22,13 @@ YEAR = int(os.environ["YEAR"])
 class FilterYearPlus:
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [ID]
+            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ( 
-            MOM_HOST, OUTPUT_EXCHANGE_1, []
+            MOM_HOST, OUTPUT_EXCHANGE_1, [], consume=False
         )
         self.output_exchange_image = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, OUTPUT_EXCHANGE_2, [f"{index}" for index in range(IMAGE_GETTER_AMOUNT)]
+            MOM_HOST, OUTPUT_EXCHANGE_2, [f"{index}" for index in range(IMAGE_GETTER_AMOUNT)], consume=False
         )
 
         self.sections = {section.lower() for section in SECTIONS}

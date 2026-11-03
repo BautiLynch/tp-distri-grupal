@@ -22,10 +22,10 @@ class FilterAverage:
 
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [ID]
+            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ( 
-            MOM_HOST, OUTPUT_EXCHANGE, []
+            MOM_HOST, OUTPUT_EXCHANGE, [], consume=False
         )
 
         self.eof_by_client = {}
@@ -59,7 +59,6 @@ class FilterAverage:
         self.words_by_client.pop(client_id, None)
         self.pending_messages_by_client.pop(client_id, None)
         self.average_by_client.pop(client_id, None)
-        logging.debug("Released state for client %s", client_id)
 
     def _process_abstract(self, client_id, url, amount_words):
         if self.average_by_client.get(client_id) is None:

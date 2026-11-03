@@ -20,10 +20,10 @@ IMAGE_USER_AGENT = os.environ.get("IMAGE_USER_AGENT", "tp-distribuidos")
 class ImageGetter:
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [ID]
+            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, OUTPUT_EXCHANGE, []
+            MOM_HOST, OUTPUT_EXCHANGE, [], consume=False
         )
 
         self.eof_by_client = {}
@@ -51,7 +51,6 @@ class ImageGetter:
             try:
                 self._get_image(client_id, name, url, image_url)
             except Exception as error:
-                logging.warning("No se pudo descargar la imagen de %s (%r): %s", url, image_url, error)
                 self._report_download_error(client_id, name, url)
 
         elif message_type == MsgType.END_OF_RECORDS:
@@ -67,7 +66,6 @@ class ImageGetter:
 
     def _release_client(self, client_id):
         self.eof_by_client.pop(client_id, None)
-        logging.debug("Released state for client %s", client_id)
 
     def close(self):
         for mom in [self.input_exchange, self.output_exchange]:
