@@ -105,8 +105,6 @@ class Client:
                 write_all(output, record)
                 output.flush()
         except Exception as error:
-            # Al apagarnos cerramos los sockets a proposito, asi que el error
-            # del receiver es esperado y no tiene que reportarse como fallo.
             if not self.stopping.is_set():
                 self.receiver_errors.put(error)
                 self.stop()
@@ -117,11 +115,9 @@ class Client:
         for line in source:
             self._check_stopping()
             external.send_msg(connection, external.MsgType.ARTICLE, line)
-            # expect_message(connection, external.MsgType.ACK)
         self._check_stopping()
         external.send_msg(connection, external.MsgType.END_OF_RECORDS)
         logging.info("Client sent all records")
-        # expect_message(connection, external.MsgType.ACK)
 
     def _validate_output(self, source):
         try:
@@ -132,8 +128,6 @@ class Client:
             raise ValueError("INPUT_PATH and OUTPUT_PATH must be different files")
 
     def _join_receiver(self, receiver):
-        # Espera a que llegue el END_OF_RECORDS, pero no bloquea la salida si
-        # el apagado ya fue pedido.
         while receiver.is_alive():
             receiver.join(timeout=0.5)
             if self.stopping.is_set():
@@ -201,7 +195,6 @@ def main():
         completed = True
     except Exception:
         if client is not None and client.stopping.is_set():
-            # Un SIGTERM/SIGINT pidio el apagado: no es un fallo.
             interrupted = True
             logging.info("Client interrupted by signal; exiting cleanly")
         else:
