@@ -12,12 +12,17 @@ from pika.exceptions import AMQPConnectionError, AMQPError
 logging.getLogger("pika").setLevel(logging.WARNING)
 
 
+class _StopConsuming(Exception):
+    """Corta start_consuming sin procesar lo que quedo en el buffer de pika."""
+
+
 class _MessageMiddlewareRabbitMQBase:
     def __init__(self, host, exchange, routing_keys):
         self.host = host
         self.exchange = exchange
         self.routing_keys = routing_keys
         self._consuming = False
+        self._stop_requested = False
         self.queue_name = None
         try:
             self.conn = pika.BlockingConnection(pika.ConnectionParameters(host=host, heartbeat=0))
@@ -53,6 +58,11 @@ class _MessageMiddlewareRabbitMQBase:
 
     def start_consuming(self, on_message_callback):
         def _pika_callback(ch, method, properties, body):
+            # pika vacia todas las entregas recibidas antes de atender timers, asi
+            # que el pedido de frenar se revisa antes de cada mensaje.
+            if self._stop_requested:
+                raise _StopConsuming
+
             def ack():
                 ch.basic_ack(delivery_tag=method.delivery_tag)
 
@@ -63,12 +73,16 @@ class _MessageMiddlewareRabbitMQBase:
 
         try:
             self._consuming = True
+            if self._stop_requested:
+                return
             self.chan.basic_consume(
                 queue=self.queue_name,
                 on_message_callback=_pika_callback,
                 auto_ack=False,
             )
             self.chan.start_consuming()
+        except _StopConsuming:
+            pass
         except AMQPConnectionError:
             logging.exception("MOM consumer disconnected %s", self._log_context())
             raise MessageMiddlewareDisconnectedError
@@ -76,6 +90,7 @@ class _MessageMiddlewareRabbitMQBase:
             logging.exception("MOM consumer failed %s", self._log_context())
             raise MessageMiddlewareMessageError
         finally:
+            self._consuming = False
             logging.info("MOM consumer stopped %s", self._log_context())
 
     def stop_consuming(self):
@@ -93,15 +108,24 @@ class _MessageMiddlewareRabbitMQBase:
     def stop_consuming_threadsafe(self):
         """Detiene el consumo de forma segura entre hilos. Este método puede llamarse desde un hilo distinto al que está ejecutando start_consuming()."""
 
+        self._stop_requested = True
         try:
-            self.conn.add_callback_threadsafe(self.stop_consuming)
-        except Exception:
-            try:
-                self.stop_consuming()
-            except Exception as e:
-                logging.warning(f"Ignoring stop error during shutdown: {e}")
+            self.conn.add_callback_threadsafe(self._abort_consuming)
+        except Exception as e:
+            logging.warning(f"Ignoring stop error during shutdown: {e}")
+
+    def _abort_consuming(self):
+        # Despierta a un consumidor inactivo, que no pasa por _pika_callback.
+        if self._consuming:
+            raise _StopConsuming
 
     def close(self):
+        # Cerrar un consumidor frenado implica rechazar las entregas pendientes y
+        # esperar al broker. Al salir el proceso se cierra el socket y RabbitMQ
+        # reencola o descarta lo pendiente por su cuenta.
+        if self._stop_requested:
+            return
+
         try:
             self.chan.close()
             self.conn.close()

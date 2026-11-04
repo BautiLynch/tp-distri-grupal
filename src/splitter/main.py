@@ -5,6 +5,7 @@ import signal
 import threading
 
 from common import middleware, hashing
+from common.shutdown import GracefulShutdown
 from common.message_protocol.internal import MsgType, serialize_msg, deserialize_msg
 
 ID = os.environ["ID"]
@@ -22,6 +23,7 @@ if not (AGGREGATION_AMOUNT == FILTER_LANGUAGE_AMOUNT >= 1) or FILTER_YEAR_AMOUNT
 
 class Splitter:
     def __init__(self):
+        self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
         )
@@ -55,10 +57,14 @@ class Splitter:
 
         batches = {}
         for word, amount in word_count.items():
+            if self.shutdown.requested.is_set():
+                break
             key = hashing.get_hash_key(f"{client_id}_{word}", FILTER_LANGUAGE_AMOUNT)
             batches.setdefault(key, []).append((word, amount))
 
         for key, batch in batches.items():
+            if self.shutdown.requested.is_set():
+                break
             self.output_exchange.send_to(
                 serialize_msg(MsgType.WORD_BATCH, client_id, language, batch),
                 routing_key=f"words.{key}",
@@ -99,16 +105,7 @@ class Splitter:
                 logging.error(f"Error closing message middleware: {e}")
 
     def start(self):
-        try:
-            self.input_exchange.start_consuming(self.process_message)
-        finally:
-            self.close()
-
-    def sigterm_handler(self, signum, frame):
-        if self.end_event.is_set():
-            return
-        self.end_event.set()
-        self.input_exchange.stop_consuming_threadsafe()
+        self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 def main():
     logging.basicConfig(
@@ -122,4 +119,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -1,10 +1,9 @@
 import os
 import logging
-import signal
-import threading
 import urllib.request
 
 from common import middleware
+from common.shutdown import GracefulShutdown
 from common.message_protocol.internal import deserialize_msg, MsgType, serialize_msg
 
 ID = os.environ["ID"]
@@ -19,6 +18,7 @@ IMAGE_USER_AGENT = os.environ.get("IMAGE_USER_AGENT", "tp-distribuidos")
 
 class ImageGetter:
     def __init__(self):
+        self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
         )
@@ -27,9 +27,6 @@ class ImageGetter:
         )
 
         self.eof_by_client = {}
-
-        self.end_event = threading.Event()
-        signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def _get_image(self, client_id, name, url, image_url):
         if not image_url:
@@ -75,16 +72,7 @@ class ImageGetter:
                 logging.error(f"Error closing message middleware: {e}")
 
     def start(self):
-        try:
-            self.input_exchange.start_consuming(self.process_message)
-        finally:
-            self.close()
-
-    def sigterm_handler(self, signum, frame):
-        if self.end_event.is_set():
-            return
-        self.end_event.set()
-        self.input_exchange.stop_consuming_threadsafe()
+        self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 def main():
     logging.basicConfig(
@@ -98,4 +86,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

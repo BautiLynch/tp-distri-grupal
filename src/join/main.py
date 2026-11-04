@@ -1,9 +1,8 @@
 import os
 import logging
-import signal
-import threading
 
 from common import middleware
+from common.shutdown import GracefulShutdown
 from common.key_item import KeyItem
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 
@@ -16,6 +15,7 @@ TOP_SIZE = int(os.environ["TOP_SIZE"])
 class JoinFilter:
 
     def __init__(self):
+        self.shutdown = GracefulShutdown()
         self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, INPUT_QUEUE
         )
@@ -25,9 +25,6 @@ class JoinFilter:
 
         self.agg_by_client = {} # Contador
         self.top_by_client = {} # Lista de palabras
-        self.end_event = threading.Event()
-
-        signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def _process_data(self, client_id, top_parcial):
         new_words = []
@@ -72,12 +69,6 @@ class JoinFilter:
             return
         ack()
 
-    def sigterm_handler(self, signum, frame):
-        if self.end_event.is_set():
-            return
-        self.end_event.set()
-        self.input_queue.stop_consuming_threadsafe()
-        
     def close(self):
         for mom in [self.input_queue, self.output_exchange]:
             try:
@@ -86,10 +77,7 @@ class JoinFilter:
                 logging.error(f"Error closing message middleware: {e}")
     
     def start(self):
-        try:
-            self.input_queue.start_consuming(self.process_message)
-        finally:
-            self.close()
+        self.shutdown.run(self.input_queue, self.process_message, self.close)
 
 def main():
     logging.basicConfig(
@@ -103,4 +91,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

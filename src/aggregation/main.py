@@ -1,10 +1,9 @@
 import heapq
 import os
 import logging
-import signal
-import threading
 
 from common import middleware, storage
+from common.shutdown import GracefulShutdown
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 
 ID = os.environ["ID"]
@@ -18,6 +17,7 @@ STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
 class AggregationFilter:
 
     def __init__(self):
+        self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [f"words.{ID}"], consume=True
         )
@@ -27,8 +27,6 @@ class AggregationFilter:
         self.eof_by_client = {}
         self.words_by_client = {}
         self.storage = storage.Storage(STORAGE_PATH)
-        self.end_event = threading.Event()
-        signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def _process_eof(self, client_id):
         # for key in self.storage.load_key(client_id):
@@ -64,12 +62,6 @@ class AggregationFilter:
             return
         ack()
 
-    def sigterm_handler(self, signum, frame):
-        if self.end_event.is_set():
-            return
-        self.end_event.set()
-        self.input_exchange.stop_consuming_threadsafe()
-
     def close(self):
         for mom in [self.input_exchange, self.output_queue]:
             try:
@@ -78,10 +70,7 @@ class AggregationFilter:
                 logging.error(f"Error closing message middleware: {e}")
 
     def start(self):
-        try:
-            self.input_exchange.start_consuming(self.process_message)
-        finally:
-            self.close()
+        self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 def main():
     logging.basicConfig(
@@ -95,4 +84,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

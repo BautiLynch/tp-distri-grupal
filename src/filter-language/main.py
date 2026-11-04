@@ -1,9 +1,8 @@
 import os
 import logging
-import signal
-import threading
 
 from common import middleware
+from common.shutdown import GracefulShutdown
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 
 ID = os.environ["ID"]
@@ -17,6 +16,7 @@ SPLITTER_AMOUNT = int(os.environ["SPLITTER_AMOUNT"])
 class FilterLanguage:
 
     def __init__(self):
+        self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [f"words.{ID}"], consume=True
         )
@@ -27,8 +27,6 @@ class FilterLanguage:
         self.eof_by_client = {}
 
         self.words_by_client = {}
-        self.end_event = threading.Event()
-        signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def process_message(self, message, ack, nack):
         message_type, client_id, fields = deserialize_msg(message)
@@ -62,12 +60,6 @@ class FilterLanguage:
         self.eof_by_client.pop(client_id, None)
         self.words_by_client.pop(client_id, None)
 
-    def sigterm_handler(self, signum, frame):
-        if self.end_event.is_set():
-            return
-        self.end_event.set()
-        self.input_exchange.stop_consuming_threadsafe()
-
     def close(self):
         for mom in [self.input_exchange, self.output_exchange]:
             try:
@@ -76,10 +68,7 @@ class FilterLanguage:
                 logging.error(f"Error closing message middleware: {e}")
 
     def start(self):
-        try:
-            self.input_exchange.start_consuming(self.process_message)
-        finally:
-            self.close()
+        self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 def main():
     logging.basicConfig(
@@ -93,4 +82,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
