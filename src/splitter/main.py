@@ -1,8 +1,6 @@
 import os
 import logging
 import re
-import signal
-import threading
 
 from common import middleware, hashing
 from common.shutdown import GracefulShutdown
@@ -34,9 +32,6 @@ class Splitter:
         )
 
         self.stopwords = self._load_stopwords("english") | self._load_stopwords("french")
-
-        self.end_event = threading.Event()
-        signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def _load_stopwords(self, language):
         file_path = os.path.join(STOPWORDS_PATH, f"{language}.txt")
