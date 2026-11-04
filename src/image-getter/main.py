@@ -12,7 +12,6 @@ OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 FILTER_YEAR_PLUS_AMOUNT = int(os.environ["FILTER_YEAR_PLUS_AMOUNT"])
 IMAGE_TIMEOUT = float(os.environ.get("IMAGE_TIMEOUT", "10"))
-# Wikimedia rechaza (403) pedidos con el User-Agent por defecto de urllib.
 IMAGE_USER_AGENT = os.environ.get("IMAGE_USER_AGENT", "tp-distribuidos")
 
 

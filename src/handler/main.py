@@ -138,8 +138,6 @@ def handle_client_response(client_socket, connection_id, client_dict, worker_pid
 
 def stop_clients(client_dict, worker_pids, sigterm_received):
     sigterm_received.value = 1
-    # El shutdown del socket de escucha no despierta accept() en Linux, por eso
-    # el loop principal usa un timeout y chequea el flag de apagado.
     for connection in list(client_dict.values()):
         try:
             connection.shutdown(socket.SHUT_RDWR)

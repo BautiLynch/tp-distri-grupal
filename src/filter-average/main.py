@@ -55,7 +55,6 @@ class FilterAverage:
             self._release_client(client_id)
 
     def _release_client(self, client_id):
-        # Q5 termino: se libera todo el estado del cliente.
         self.eof_by_client.pop(client_id, None)
         self.words_by_client.pop(client_id, None)
         self.pending_messages_by_client.pop(client_id, None)

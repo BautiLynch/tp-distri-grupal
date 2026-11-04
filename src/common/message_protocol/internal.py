@@ -34,21 +34,6 @@ def _serialize(message_type, client_id, payload):
         payload
     )
 
-# HEADER (type, client_id, payload_size) + PAYLOAD
-# PAYLOAD: (tamaño de cada campo + campo) * cantidad de campos
-# def _serialize_payload(*fields):
-#     parts = []
-#     for value in fields:
-#         if isinstance(value, str):
-#             value = value.encode("utf-8")
-#         elif not isinstance(value, (bytes, bytearray, memoryview)):
-#             raise ValueError("Record fields must be str or bytes")
-        
-#         parts.append(len(value).to_bytes(UINT32_SIZE, "big"))
-#         parts.append(value)
-
-#     return b"".join(parts)
-
 def _deserialize(message):
     if len(message) < HEADER_SIZE:
         raise ValueError("Incomplete internal header")

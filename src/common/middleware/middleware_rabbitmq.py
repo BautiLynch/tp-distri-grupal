@@ -58,8 +58,6 @@ class _MessageMiddlewareRabbitMQBase:
 
     def start_consuming(self, on_message_callback):
         def _pika_callback(ch, method, properties, body):
-            # pika vacia todas las entregas recibidas antes de atender timers, asi
-            # que el pedido de frenar se revisa antes de cada mensaje.
             if self._stop_requested:
                 raise _StopConsuming
 
@@ -115,14 +113,10 @@ class _MessageMiddlewareRabbitMQBase:
             logging.warning(f"Ignoring stop error during shutdown: {e}")
 
     def _abort_consuming(self):
-        # Despierta a un consumidor inactivo, que no pasa por _pika_callback.
         if self._consuming:
             raise _StopConsuming
 
     def close(self):
-        # Cerrar un consumidor frenado implica rechazar las entregas pendientes y
-        # esperar al broker. Al salir el proceso se cierra el socket y RabbitMQ
-        # reencola o descarta lo pendiente por su cuenta.
         if self._stop_requested:
             return
 

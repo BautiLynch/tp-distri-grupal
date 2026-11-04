@@ -64,8 +64,6 @@ class Splitter:
                 serialize_msg(MsgType.WORD_BATCH, client_id, language, batch),
                 routing_key=f"words_{key}",
             )
-
-        # Excluir abstracts sin palabras validas conserva el denominador de Q5.
         if word_count:
             key = hashing.get_hash_key(f"{client_id}_{url}", FILTER_YEAR_AMOUNT)
             self.output_exchange.send_to(
