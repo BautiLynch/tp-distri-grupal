@@ -3,6 +3,8 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := test
 REFERENCIA ?= test/referencia.json
 GB ?=
+DEBUG ?= 0
+export LOG_LEVEL := $(if $(filter 1 true yes,$(DEBUG)),DEBUG,INFO)
 
 .PHONY: setup up logs test run verify down
 

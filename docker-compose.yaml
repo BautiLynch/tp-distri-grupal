@@ -156,6 +156,7 @@ services:
       GATEWAY_HOST: gateway
       GATEWAY_PORT: "5678"
       INPUT_PATH: /datasets/1.jsonl
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       OUTPUT_PATH: /output/output_0.bin
       PYTHONUNBUFFERED: "1"
     volumes:
@@ -186,6 +187,7 @@ services:
       GATEWAY_HOST: gateway
       GATEWAY_PORT: "5678"
       INPUT_PATH: /datasets/2.jsonl
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       OUTPUT_PATH: /output/output_1.bin
       PYTHONUNBUFFERED: "1"
     volumes:
@@ -216,6 +218,7 @@ services:
       GATEWAY_HOST: gateway
       GATEWAY_PORT: "5678"
       INPUT_PATH: /datasets/3.jsonl
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       OUTPUT_PATH: /output/output_2.bin
       PYTHONUNBUFFERED: "1"
     volumes:
@@ -620,6 +623,7 @@ services:
       ID: "0"
       IMAGE_TIMEOUT: "10"
       INPUT_EXCHANGE: image_getter
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: results
       PYTHONUNBUFFERED: "1"

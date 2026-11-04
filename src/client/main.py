@@ -10,6 +10,9 @@ import time
 from common.message_protocol import external
 
 
+LOG_EVERY = 50000
+
+
 def expect_message(connection, expected_type):
     message_type, payload = external.recv_msg(connection)
     if message_type != expected_type:
@@ -94,6 +97,7 @@ class Client:
             external.send_msg(connection, external.MsgType.CLIENT_ID, client_id)
             expect_message(connection, external.MsgType.ACK)
             self.receiver_ready.set()
+            received_count = 0
             while True:
                 message_type, payload = external.recv_msg(connection)
                 if message_type == external.MsgType.END_OF_RECORDS:
@@ -104,6 +108,11 @@ class Client:
                     raise ValueError(f"Unexpected handler message {message_type}")
                 write_all(output, record)
                 output.flush()
+                received_count += 1
+                if received_count % LOG_EVERY == 0:
+                    logging.debug(
+                        "Client %s received %s results", client_id, received_count,
+                    )
         except Exception as error:
             if not self.stopping.is_set():
                 self.receiver_errors.put(error)
@@ -112,9 +121,11 @@ class Client:
             self.receiver_ready.set()
 
     def _send_records(self, connection, source):
-        for line in source:
+        for sent_count, line in enumerate(source, start=1):
             self._check_stopping()
             external.send_msg(connection, external.MsgType.ARTICLE, line)
+            if sent_count % LOG_EVERY == 0:
+                logging.debug("Client sent %s articles", sent_count)
         self._check_stopping()
         external.send_msg(connection, external.MsgType.END_OF_RECORDS)
         logging.info("Client sent all records")
@@ -173,7 +184,7 @@ class Client:
 
 def main():
     logging.basicConfig(
-        level=logging.INFO,
+        level=os.environ.get("LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s.%(msecs)03d | %(levelname)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
