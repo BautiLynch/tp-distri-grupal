@@ -1,6 +1,5 @@
 import os
 import logging
-import re
 
 from common import middleware, hashing
 from common.shutdown import GracefulShutdown
@@ -42,7 +41,9 @@ class Splitter:
 
     def _split_and_send(self, client_id, article):
         url, language, date_modified, abstract = article
-        words = re.findall(r"\w+", abstract.lower())
+        text = "".join(char if char.isalnum() or char == "_" else " "
+                       for char in abstract.lower())
+        words = text.split()
         word_count = {}
 
         for word in words:

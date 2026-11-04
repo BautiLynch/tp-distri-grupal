@@ -6,7 +6,6 @@ import heapq
 import json
 import os
 from pathlib import Path
-import re
 import signal
 import sys
 import tempfile
@@ -56,7 +55,9 @@ def analyze(source_path, ignored, cutoff_year, wanted_language, accepted, limit)
                 summary = entry.get("abstract")
                 if summary is not None and not isinstance(summary, str):
                     raise ValueError("abstract debe ser texto o null")
-                occurrences = [token for token in re.findall(r"\w+", (summary or "").lower())
+                text = "".join(char if char.isalnum() or char == "_" else " "
+                               for char in (summary or "").lower())
+                occurrences = [token for token in text.split()
                                if token not in ignored and not token.isdecimal()]
                 distinct = set(occurrences)
                 vocabulary[locale].update(distinct)

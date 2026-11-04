@@ -32,12 +32,11 @@ test: up
 	trap 'kill "$$logs_pid" 2>/dev/null || true' EXIT; \
 	python3 tools/verificar.py --referencia "$(REFERENCIA)" --compose docker-compose.yaml --wait > verificacion.log 2>&1; \
 	status=$$?; \
-	kill "$$logs_pid" 2>/dev/null || true; \
+	cat verificacion.log; \
+	docker compose logs >> ejecucion.log; \
+	docker compose --progress quiet down || status=$$?; \
 	wait $$logs_pid 2>/dev/null; \
 	trap - EXIT; \
-	docker compose logs >> ejecucion.log; \
-	docker compose down || status=$$?; \
-	cat verificacion.log; \
 	exit $$status
 
 run: test

@@ -455,10 +455,6 @@ def main():
         if args.referencia:
             reference_path = resolve(args.referencia)
             expected = load_reference(reference_path)
-            print(f"referencia: {reference_path}")
-            print(f"dataset original: {expected['dataset']['name']} (SHA-256 {expected['dataset']['sha256']})")
-            print(f"articulos: {expected['dataset']['articles']}")
-            print(f"criterio Q5: {expected['config']['q5']}")
             year = expected["config"]["year"]
         else:
             dataset_path = resolve(args.dataset or "datasets/wikipedia-1000.jsonl")
@@ -475,9 +471,6 @@ def main():
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
-
-    print(f"Q5: umbral {expected['threshold']:.4f} sobre {expected['pre_urls']} abstracts <= {year}"
-          f"; {expected['post_urls']} urls > {year}")
     print("esperado: " + ", ".join(
         f"Q{query}={len(expected[query])}" for query in range(1, 6)
     ))
