@@ -152,8 +152,22 @@ def stop_clients(client_dict, worker_pids, sigterm_received):
             logging.debug("Worker %s already stopped", worker_pid)
 
 
+def initialize_worker():
+    logging.basicConfig(
+        level=logging.INFO,
+        force=True,
+        format="%(asctime)s.%(msecs)03d | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+
 def main():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s.%(msecs)03d | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     shutdown_requested = threading.Event()
 
     def request_shutdown(signum, frame):
@@ -168,8 +182,7 @@ def main():
         sigterm_received = manager.Value("c_short", 0)
         with multiprocessing.Pool(
             processes=os.process_cpu_count(),
-            initializer=signal.signal,
-            initargs=(signal.SIGTERM, signal.SIG_IGN),
+            initializer=initialize_worker,
         ) as processes_pool:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
                 server_socket.bind((SERVER_HOST, SERVER_PORT))

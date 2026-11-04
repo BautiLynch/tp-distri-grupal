@@ -1,5 +1,6 @@
 import os
 import logging
+import re
 
 from common import middleware, hashing
 from common.shutdown import GracefulShutdown
@@ -14,8 +15,8 @@ STOPWORDS_PATH = os.environ.get("STOPWORDS_PATH", "stopwords")
 AGGREGATION_AMOUNT = int(os.environ["AGGREGATION_AMOUNT"])
 FILTER_YEAR_AMOUNT = int(os.environ["FILTER_YEAR_AMOUNT"])
 FILTER_LANGUAGE_AMOUNT = int(os.environ["FILTER_LANGUAGE_AMOUNT"])
-if not (AGGREGATION_AMOUNT == FILTER_YEAR_AMOUNT == FILTER_LANGUAGE_AMOUNT >= 1):
-    raise ValueError("aggregation, filter_year y filter_language deben tener la misma cantidad de replicas")
+if not (AGGREGATION_AMOUNT == FILTER_LANGUAGE_AMOUNT >= 1) or FILTER_YEAR_AMOUNT < 1:
+    raise ValueError("aggregation y filter_language deben tener la misma cantidad de replicas; filter_year debe tener al menos una")
 
 
 class Splitter:
@@ -25,52 +26,53 @@ class Splitter:
             MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, OUTPUT_EXCHANGE, [f"{index}" for index in range(FILTER_LANGUAGE_AMOUNT)], consume=False
+            MOM_HOST, OUTPUT_EXCHANGE,
+            [f"words_{index}" for index in range(FILTER_LANGUAGE_AMOUNT)]
+            + [f"urls_{index}" for index in range(FILTER_YEAR_AMOUNT)], consume=False
         )
 
-        self.en_stopwords = self._load_stopwords("english")
-        self.fr_stopwords = self._load_stopwords("french")
-
-        self.word_count = {}
+        self.stopwords = self._load_stopwords("english") | self._load_stopwords("french")
 
     def _load_stopwords(self, language):
         file_path = os.path.join(STOPWORDS_PATH, f"{language}.txt")
         with open(file_path, "r", encoding="utf-8") as file:
-            stopwords_list = [line.strip() for line in file.readlines()]
+            stopwords_list = [line.strip() for line in file]
 
         return set(stopwords_list)
 
     def _split_and_send(self, client_id, article):
         url, language, date_modified, abstract = article
-        words = abstract.split(" ")
+        words = re.findall(r"\w+", abstract.lower())
+        word_count = {}
 
         for word in words:
-            if self._is_stopword(word, language):
+            if word in self.stopwords or word.isdecimal():
                 continue
+            word_count[word] = word_count.get(word, 0) + 1
 
-            self.word_count[word] = self.word_count.get(word, 0) + 1
-
-        for word, amount in self.word_count.items():
+        batches = {}
+        for word in word_count:
             if self.shutdown.requested.is_set():
                 break
-
             key = hashing.get_hash_key(f"{client_id}_{word}", FILTER_LANGUAGE_AMOUNT)
+            batches.setdefault(key, []).append(word)
 
+        for key, batch in batches.items():
+            if self.shutdown.requested.is_set():
+                break
             self.output_exchange.send_to(
-                serialize_msg(MsgType.SPLIT_WORD, client_id,
-                              word, language, url, date_modified, amount),
-                routing_key=key,
+                serialize_msg(MsgType.WORD_BATCH, client_id, language, batch),
+                routing_key=f"words_{key}",
             )
 
-        self.word_count.clear()
-
-    def _is_stopword(self, word, language):
-        if language == "en":
-            return word in self.en_stopwords
-        elif language == "fr":
-            return word in self.fr_stopwords
-        else:
-            return False
+        # Excluir abstracts sin palabras validas conserva el denominador de Q5.
+        if word_count:
+            key = hashing.get_hash_key(f"{client_id}_{url}", FILTER_YEAR_AMOUNT)
+            self.output_exchange.send_to(
+                serialize_msg(MsgType.WORD_YEAR_AMOUNT, client_id,
+                              url, date_modified, sum(word_count.values())),
+                routing_key=f"urls_{key}",
+            )
 
     def process_message(self, message, ack, nack):
         try:
@@ -101,7 +103,11 @@ class Splitter:
         self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 def main():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s.%(msecs)03d | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     splitter = Splitter()
     splitter.start()
     return 0

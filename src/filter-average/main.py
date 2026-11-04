@@ -33,9 +33,13 @@ class FilterAverage:
         self.average_by_client = {}
         self.pending_messages_by_client = {}
 
-    def _process_eof(self, client_id):
-        self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
-        if self.eof_by_client[client_id] == FILTER_YEAR_AMOUNT: 
+    def _process_eof(self, client_id, message_type):
+        eof = self.eof_by_client.setdefault(client_id, {"total": 0, "baseline": 0})
+        eof["total"] += 1
+        if message_type == MsgType.BASELINE_END:
+            eof["baseline"] += 1
+
+        if (message_type == MsgType.BASELINE_END and eof["baseline"] == FILTER_YEAR_AMOUNT):
             words_by_url = self.words_by_client.get(client_id, {})
             amount_urls = len(words_by_url)
             amount_words = sum(words_by_url.values())
@@ -46,7 +50,7 @@ class FilterAverage:
             for url, amount_words in self.pending_messages_by_client.get(client_id, []):
                 self._process_abstract(client_id, url, amount_words)
 
-        elif self.eof_by_client[client_id] == AVERAGE_AMOUNT + FILTER_YEAR_AMOUNT:
+        if eof["total"] == FILTER_YEAR_AMOUNT + AVERAGE_AMOUNT:
             self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q5_RESULT), routing_key=client_id)
             self._release_client(client_id)
 
@@ -76,8 +80,8 @@ class FilterAverage:
             else:
                 self._process_abstract(client_id, url, amount)
 
-        elif message_type == MsgType.END_OF_RECORDS:
-            self._process_eof(client_id)
+        elif message_type in (MsgType.BASELINE_END, MsgType.END_OF_RECORDS):
+            self._process_eof(client_id, message_type)
 
         else:
             nack()
@@ -95,7 +99,11 @@ class FilterAverage:
         self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 def main():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s.%(msecs)03d | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     filter_average = FilterAverage()
     filter_average.start()
     return 0

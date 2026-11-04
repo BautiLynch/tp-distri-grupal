@@ -62,6 +62,7 @@ class Client:
             self._check_stopping()
             try:
                 connection = socket.create_connection(address, self.connection_timeout)
+                logging.info("Connected to %s:%s", *address)
                 break
             except OSError as error:
                 self._check_stopping()
@@ -119,6 +120,7 @@ class Client:
             # expect_message(connection, external.MsgType.ACK)
         self._check_stopping()
         external.send_msg(connection, external.MsgType.END_OF_RECORDS)
+        logging.info("Client sent all records")
         # expect_message(connection, external.MsgType.ACK)
 
     def _validate_output(self, source):
@@ -176,7 +178,11 @@ class Client:
 
 
 def main():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s.%(msecs)03d | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     started_at = time.perf_counter()
     logging.info("Client started")
     completed = False

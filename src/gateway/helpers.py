@@ -57,7 +57,7 @@ def preprocess_article(article):
         name, url, language, date_modified, image_url,
         section_names(article.get("sections")),
     )
-    split = (
-        url, language, date_modified, article_text(article, "abstract", ""),
-    )
+    split = None
+    if article.get("abstract") is not None:
+        split = (url, language, date_modified, article_text(article, "abstract"))
     return filtered, split

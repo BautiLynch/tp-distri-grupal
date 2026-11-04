@@ -80,7 +80,11 @@ class JoinFilter:
         self.shutdown.run(self.input_queue, self.process_message, self.close)
 
 def main():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s.%(msecs)03d | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     join_filter = JoinFilter()
     join_filter.start()
     return 0

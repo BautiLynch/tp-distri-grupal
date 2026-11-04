@@ -16,7 +16,7 @@ services:
       MOM_HOST: rabbitmq
       OUTPUT_QUEUE: join_queue
       PYTHONUNBUFFERED: "1"
-      SPLITTER_AMOUNT: "5"
+      SPLITTER_AMOUNT: "3"
       STORAGE_PATH: /storage
       TOP_SIZE: "20"
     volumes:
@@ -38,7 +38,7 @@ services:
       MOM_HOST: rabbitmq
       OUTPUT_QUEUE: join_queue
       PYTHONUNBUFFERED: "1"
-      SPLITTER_AMOUNT: "5"
+      SPLITTER_AMOUNT: "3"
       STORAGE_PATH: /storage
       TOP_SIZE: "20"
     volumes:
@@ -60,55 +60,11 @@ services:
       MOM_HOST: rabbitmq
       OUTPUT_QUEUE: join_queue
       PYTHONUNBUFFERED: "1"
-      SPLITTER_AMOUNT: "5"
+      SPLITTER_AMOUNT: "3"
       STORAGE_PATH: /storage
       TOP_SIZE: "20"
     volumes:
       - source: aggregation_storage_0_2
-        target: /storage
-        type: volume
-        volume: {}
-  aggregation_3:
-    build:
-      context: ./src
-      dockerfile: aggregation/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-        required: true
-    environment:
-      ID: "3"
-      INPUT_EXCHANGE: splitter_output
-      MOM_HOST: rabbitmq
-      OUTPUT_QUEUE: join_queue
-      PYTHONUNBUFFERED: "1"
-      SPLITTER_AMOUNT: "5"
-      STORAGE_PATH: /storage
-      TOP_SIZE: "20"
-    volumes:
-      - source: aggregation_storage_0_3
-        target: /storage
-        type: volume
-        volume: {}
-  aggregation_4:
-    build:
-      context: ./src
-      dockerfile: aggregation/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-        required: true
-    environment:
-      ID: "4"
-      INPUT_EXCHANGE: splitter_output
-      MOM_HOST: rabbitmq
-      OUTPUT_QUEUE: join_queue
-      PYTHONUNBUFFERED: "1"
-      SPLITTER_AMOUNT: "5"
-      STORAGE_PATH: /storage
-      TOP_SIZE: "20"
-    volumes:
-      - source: aggregation_storage_0_4
         target: /storage
         type: volume
         volume: {}
@@ -122,8 +78,8 @@ services:
         required: true
     environment:
       AVERAGE_PREFIX: average
-      FILTER_AVERAGE_AMOUNT: "5"
-      FILTER_YEAR_AMOUNT: "5"
+      FILTER_AVERAGE_AMOUNT: "3"
+      FILTER_YEAR_AMOUNT: "3"
       ID: "0"
       INPUT_EXCHANGE: average
       MOM_HOST: rabbitmq
@@ -146,8 +102,8 @@ services:
         required: true
     environment:
       AVERAGE_PREFIX: average
-      FILTER_AVERAGE_AMOUNT: "5"
-      FILTER_YEAR_AMOUNT: "5"
+      FILTER_AVERAGE_AMOUNT: "3"
+      FILTER_YEAR_AMOUNT: "3"
       ID: "1"
       INPUT_EXCHANGE: average
       MOM_HOST: rabbitmq
@@ -170,8 +126,8 @@ services:
         required: true
     environment:
       AVERAGE_PREFIX: average
-      FILTER_AVERAGE_AMOUNT: "5"
-      FILTER_YEAR_AMOUNT: "5"
+      FILTER_AVERAGE_AMOUNT: "3"
+      FILTER_YEAR_AMOUNT: "3"
       ID: "2"
       INPUT_EXCHANGE: average
       MOM_HOST: rabbitmq
@@ -181,54 +137,6 @@ services:
       YEAR: "2021"
     volumes:
       - source: average_storage_0_2
-        target: /storage
-        type: volume
-        volume: {}
-  average_3:
-    build:
-      context: ./src
-      dockerfile: average/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-        required: true
-    environment:
-      AVERAGE_PREFIX: average
-      FILTER_AVERAGE_AMOUNT: "5"
-      FILTER_YEAR_AMOUNT: "5"
-      ID: "3"
-      INPUT_EXCHANGE: average
-      MOM_HOST: rabbitmq
-      OUTPUT_EXCHANGE: filter_average
-      PYTHONUNBUFFERED: "1"
-      STORAGE_PATH: /storage
-      YEAR: "2021"
-    volumes:
-      - source: average_storage_0_3
-        target: /storage
-        type: volume
-        volume: {}
-  average_4:
-    build:
-      context: ./src
-      dockerfile: average/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-        required: true
-    environment:
-      AVERAGE_PREFIX: average
-      FILTER_AVERAGE_AMOUNT: "5"
-      FILTER_YEAR_AMOUNT: "5"
-      ID: "4"
-      INPUT_EXCHANGE: average
-      MOM_HOST: rabbitmq
-      OUTPUT_EXCHANGE: filter_average
-      PYTHONUNBUFFERED: "1"
-      STORAGE_PATH: /storage
-      YEAR: "2021"
-    volumes:
-      - source: average_storage_0_4
         target: /storage
         type: volume
         volume: {}
@@ -249,6 +157,66 @@ services:
       GATEWAY_PORT: "5678"
       INPUT_PATH: /datasets/1.jsonl
       OUTPUT_PATH: /output/output_0.bin
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - bind:
+          create_host_path: true
+        read_only: true
+        source: ./datasets
+        target: /datasets
+        type: bind
+      - bind:
+          create_host_path: true
+        source: ./output
+        target: /output
+        type: bind
+  client_1:
+    build:
+      context: ./src
+      dockerfile: client/Dockerfile
+    depends_on:
+      gateway:
+        condition: service_started
+        required: true
+      handler:
+        condition: service_started
+        required: true
+    environment:
+      CONNECTION_TIMEOUT: "10"
+      GATEWAY_HOST: gateway
+      GATEWAY_PORT: "5678"
+      INPUT_PATH: /datasets/2.jsonl
+      OUTPUT_PATH: /output/output_1.bin
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - bind:
+          create_host_path: true
+        read_only: true
+        source: ./datasets
+        target: /datasets
+        type: bind
+      - bind:
+          create_host_path: true
+        source: ./output
+        target: /output
+        type: bind
+  client_2:
+    build:
+      context: ./src
+      dockerfile: client/Dockerfile
+    depends_on:
+      gateway:
+        condition: service_started
+        required: true
+      handler:
+        condition: service_started
+        required: true
+    environment:
+      CONNECTION_TIMEOUT: "10"
+      GATEWAY_HOST: gateway
+      GATEWAY_PORT: "5678"
+      INPUT_PATH: /datasets/3.jsonl
+      OUTPUT_PATH: /output/output_2.bin
       PYTHONUNBUFFERED: "1"
     volumes:
       - bind:
@@ -322,46 +290,6 @@ services:
       PYTHONUNBUFFERED: "1"
       SECTIONS: Biography,Biographie
       YEAR: "2020"
-  filter_3:
-    build:
-      context: ./src
-      dockerfile: filter/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-        required: true
-    environment:
-      ID: "3"
-      IMAGE_GETTER_AMOUNT: "1"
-      IMAGE_GETTER_PREFIX: image_getter
-      INPUT_EXCHANGE: filter
-      LANGUAGE: en
-      MOM_HOST: rabbitmq
-      OUTPUT_EXCHANGE_1: results
-      OUTPUT_EXCHANGE_2: image_getter
-      PYTHONUNBUFFERED: "1"
-      SECTIONS: Biography,Biographie
-      YEAR: "2020"
-  filter_4:
-    build:
-      context: ./src
-      dockerfile: filter/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-        required: true
-    environment:
-      ID: "4"
-      IMAGE_GETTER_AMOUNT: "1"
-      IMAGE_GETTER_PREFIX: image_getter
-      INPUT_EXCHANGE: filter
-      LANGUAGE: en
-      MOM_HOST: rabbitmq
-      OUTPUT_EXCHANGE_1: results
-      OUTPUT_EXCHANGE_2: image_getter
-      PYTHONUNBUFFERED: "1"
-      SECTIONS: Biography,Biographie
-      YEAR: "2020"
   filter_average_0:
     build:
       context: ./src
@@ -371,8 +299,8 @@ services:
         condition: service_healthy
         required: true
     environment:
-      AVERAGE_AMOUNT: "5"
-      FILTER_YEAR_AMOUNT: "5"
+      AVERAGE_AMOUNT: "3"
+      FILTER_YEAR_AMOUNT: "3"
       ID: "0"
       INPUT_EXCHANGE: filter_average
       MOM_HOST: rabbitmq
@@ -394,8 +322,8 @@ services:
         condition: service_healthy
         required: true
     environment:
-      AVERAGE_AMOUNT: "5"
-      FILTER_YEAR_AMOUNT: "5"
+      AVERAGE_AMOUNT: "3"
+      FILTER_YEAR_AMOUNT: "3"
       ID: "1"
       INPUT_EXCHANGE: filter_average
       MOM_HOST: rabbitmq
@@ -417,8 +345,8 @@ services:
         condition: service_healthy
         required: true
     environment:
-      AVERAGE_AMOUNT: "5"
-      FILTER_YEAR_AMOUNT: "5"
+      AVERAGE_AMOUNT: "3"
+      FILTER_YEAR_AMOUNT: "3"
       ID: "2"
       INPUT_EXCHANGE: filter_average
       MOM_HOST: rabbitmq
@@ -428,52 +356,6 @@ services:
       YEAR: "2020"
     volumes:
       - source: filter_average_storage_0_2
-        target: /storage
-        type: volume
-        volume: {}
-  filter_average_3:
-    build:
-      context: ./src
-      dockerfile: filter-average/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-        required: true
-    environment:
-      AVERAGE_AMOUNT: "5"
-      FILTER_YEAR_AMOUNT: "5"
-      ID: "3"
-      INPUT_EXCHANGE: filter_average
-      MOM_HOST: rabbitmq
-      OUTPUT_EXCHANGE: results
-      PYTHONUNBUFFERED: "1"
-      STORAGE_PATH: /storage
-      YEAR: "2020"
-    volumes:
-      - source: filter_average_storage_0_3
-        target: /storage
-        type: volume
-        volume: {}
-  filter_average_4:
-    build:
-      context: ./src
-      dockerfile: filter-average/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-        required: true
-    environment:
-      AVERAGE_AMOUNT: "5"
-      FILTER_YEAR_AMOUNT: "5"
-      ID: "4"
-      INPUT_EXCHANGE: filter_average
-      MOM_HOST: rabbitmq
-      OUTPUT_EXCHANGE: results
-      PYTHONUNBUFFERED: "1"
-      STORAGE_PATH: /storage
-      YEAR: "2020"
-    volumes:
-      - source: filter_average_storage_0_4
         target: /storage
         type: volume
         volume: {}
@@ -491,7 +373,7 @@ services:
       MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: results
       PYTHONUNBUFFERED: "1"
-      SPLITTER_AMOUNT: "5"
+      SPLITTER_AMOUNT: "3"
       STORAGE_PATH: /storage
     volumes:
       - source: filter_language_storage_0
@@ -512,7 +394,7 @@ services:
       MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: results
       PYTHONUNBUFFERED: "1"
-      SPLITTER_AMOUNT: "5"
+      SPLITTER_AMOUNT: "3"
       STORAGE_PATH: /storage
     volumes:
       - source: filter_language_storage_1
@@ -533,52 +415,10 @@ services:
       MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: results
       PYTHONUNBUFFERED: "1"
-      SPLITTER_AMOUNT: "5"
+      SPLITTER_AMOUNT: "3"
       STORAGE_PATH: /storage
     volumes:
       - source: filter_language_storage_0_2
-        target: /storage
-        type: volume
-        volume: {}
-  filter_language_3:
-    build:
-      context: ./src
-      dockerfile: filter-language/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-        required: true
-    environment:
-      ID: "3"
-      INPUT_EXCHANGE: splitter_output
-      MOM_HOST: rabbitmq
-      OUTPUT_EXCHANGE: results
-      PYTHONUNBUFFERED: "1"
-      SPLITTER_AMOUNT: "5"
-      STORAGE_PATH: /storage
-    volumes:
-      - source: filter_language_storage_0_3
-        target: /storage
-        type: volume
-        volume: {}
-  filter_language_4:
-    build:
-      context: ./src
-      dockerfile: filter-language/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-        required: true
-    environment:
-      ID: "4"
-      INPUT_EXCHANGE: splitter_output
-      MOM_HOST: rabbitmq
-      OUTPUT_EXCHANGE: results
-      PYTHONUNBUFFERED: "1"
-      SPLITTER_AMOUNT: "5"
-      STORAGE_PATH: /storage
-    volumes:
-      - source: filter_language_storage_0_4
         target: /storage
         type: volume
         volume: {}
@@ -591,15 +431,15 @@ services:
         condition: service_healthy
         required: true
     environment:
-      AVERAGE_AMOUNT: "5"
+      AVERAGE_AMOUNT: "3"
       AVERAGE_EXCHANGE: average
-      FILTER_AVERAGE_AMOUNT: "5"
+      FILTER_AVERAGE_AMOUNT: "3"
       FILTER_AVERAGE_EXCHANGE: filter_average
       ID: "0"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
       PYTHONUNBUFFERED: "1"
-      SPLITTER_AMOUNT: "5"
+      SPLITTER_AMOUNT: "3"
       STORAGE_PATH: /storage
       YEAR: "2020"
     volumes:
@@ -616,15 +456,15 @@ services:
         condition: service_healthy
         required: true
     environment:
-      AVERAGE_AMOUNT: "5"
+      AVERAGE_AMOUNT: "3"
       AVERAGE_EXCHANGE: average
-      FILTER_AVERAGE_AMOUNT: "5"
+      FILTER_AVERAGE_AMOUNT: "3"
       FILTER_AVERAGE_EXCHANGE: filter_average
       ID: "1"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
       PYTHONUNBUFFERED: "1"
-      SPLITTER_AMOUNT: "5"
+      SPLITTER_AMOUNT: "3"
       STORAGE_PATH: /storage
       YEAR: "2020"
     volumes:
@@ -641,69 +481,19 @@ services:
         condition: service_healthy
         required: true
     environment:
-      AVERAGE_AMOUNT: "5"
+      AVERAGE_AMOUNT: "3"
       AVERAGE_EXCHANGE: average
-      FILTER_AVERAGE_AMOUNT: "5"
+      FILTER_AVERAGE_AMOUNT: "3"
       FILTER_AVERAGE_EXCHANGE: filter_average
       ID: "2"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
       PYTHONUNBUFFERED: "1"
-      SPLITTER_AMOUNT: "5"
+      SPLITTER_AMOUNT: "3"
       STORAGE_PATH: /storage
       YEAR: "2020"
     volumes:
       - source: filter_year_storage_0_2
-        target: /storage
-        type: volume
-        volume: {}
-  filter_year_3:
-    build:
-      context: ./src
-      dockerfile: filter-year/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-        required: true
-    environment:
-      AVERAGE_AMOUNT: "5"
-      AVERAGE_EXCHANGE: average
-      FILTER_AVERAGE_AMOUNT: "5"
-      FILTER_AVERAGE_EXCHANGE: filter_average
-      ID: "3"
-      INPUT_EXCHANGE: splitter_output
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
-      SPLITTER_AMOUNT: "5"
-      STORAGE_PATH: /storage
-      YEAR: "2020"
-    volumes:
-      - source: filter_year_storage_0_3
-        target: /storage
-        type: volume
-        volume: {}
-  filter_year_4:
-    build:
-      context: ./src
-      dockerfile: filter-year/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-        required: true
-    environment:
-      AVERAGE_AMOUNT: "5"
-      AVERAGE_EXCHANGE: average
-      FILTER_AVERAGE_AMOUNT: "5"
-      FILTER_AVERAGE_EXCHANGE: filter_average
-      ID: "4"
-      INPUT_EXCHANGE: splitter_output
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
-      SPLITTER_AMOUNT: "5"
-      STORAGE_PATH: /storage
-      YEAR: "2020"
-    volumes:
-      - source: filter_year_storage_0_4
         target: /storage
         type: volume
         volume: {}
@@ -721,12 +511,6 @@ services:
       aggregation_2:
         condition: service_started
         required: true
-      aggregation_3:
-        condition: service_started
-        required: true
-      aggregation_4:
-        condition: service_started
-        required: true
       average_0:
         condition: service_started
         required: true
@@ -734,12 +518,6 @@ services:
         condition: service_started
         required: true
       average_2:
-        condition: service_started
-        required: true
-      average_3:
-        condition: service_started
-        required: true
-      average_4:
         condition: service_started
         required: true
       filter_0:
@@ -751,12 +529,6 @@ services:
       filter_2:
         condition: service_started
         required: true
-      filter_3:
-        condition: service_started
-        required: true
-      filter_4:
-        condition: service_started
-        required: true
       filter_average_0:
         condition: service_started
         required: true
@@ -764,12 +536,6 @@ services:
         condition: service_started
         required: true
       filter_average_2:
-        condition: service_started
-        required: true
-      filter_average_3:
-        condition: service_started
-        required: true
-      filter_average_4:
         condition: service_started
         required: true
       filter_language_0:
@@ -781,12 +547,6 @@ services:
       filter_language_2:
         condition: service_started
         required: true
-      filter_language_3:
-        condition: service_started
-        required: true
-      filter_language_4:
-        condition: service_started
-        required: true
       filter_year_0:
         condition: service_started
         required: true
@@ -794,12 +554,6 @@ services:
         condition: service_started
         required: true
       filter_year_2:
-        condition: service_started
-        required: true
-      filter_year_3:
-        condition: service_started
-        required: true
-      filter_year_4:
         condition: service_started
         required: true
       handler:
@@ -823,14 +577,8 @@ services:
       splitter_2:
         condition: service_started
         required: true
-      splitter_3:
-        condition: service_started
-        required: true
-      splitter_4:
-        condition: service_started
-        required: true
     environment:
-      FILTER_AMOUNT: "5"
+      FILTER_AMOUNT: "3"
       FILTER_PREFIX: filter
       HANDLER_HOST: handler
       HANDLER_PORT: "5679"
@@ -838,7 +586,7 @@ services:
       PYTHONUNBUFFERED: "1"
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: "5678"
-      SPLITTER_AMOUNT: "5"
+      SPLITTER_AMOUNT: "3"
       SPLITTER_PREFIX: splitter
   handler:
     build:
@@ -852,11 +600,11 @@ services:
       INPUT_EXCHANGE: results
       MOM_HOST: rabbitmq
       PYTHONUNBUFFERED: "1"
-      QUERY_1_REPLICAS: "5"
+      QUERY_1_REPLICAS: "3"
       QUERY_2_REPLICAS: "1"
-      QUERY_3_REPLICAS: "5"
+      QUERY_3_REPLICAS: "3"
       QUERY_4_REPLICAS: "1"
-      QUERY_5_REPLICAS: "5"
+      QUERY_5_REPLICAS: "3"
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: "5679"
   image_getter_0:
@@ -868,7 +616,7 @@ services:
         condition: service_healthy
         required: true
     environment:
-      FILTER_YEAR_PLUS_AMOUNT: "5"
+      FILTER_YEAR_PLUS_AMOUNT: "3"
       ID: "0"
       IMAGE_TIMEOUT: "10"
       INPUT_EXCHANGE: image_getter
@@ -884,7 +632,7 @@ services:
         condition: service_healthy
         required: true
     environment:
-      AGGREGATION_AMOUNT: "5"
+      AGGREGATION_AMOUNT: "3"
       INPUT_QUEUE: join_queue
       MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: results
@@ -924,13 +672,13 @@ services:
         condition: service_healthy
         required: true
     environment:
-      AGGREGATION_AMOUNT: "5"
-      OUTPUT_EXCHANGE: splitter_output
-      FILTER_LANGUAGE_AMOUNT: "5"
-      FILTER_YEAR_AMOUNT: "5"
+      AGGREGATION_AMOUNT: "3"
+      FILTER_LANGUAGE_AMOUNT: "3"
+      FILTER_YEAR_AMOUNT: "3"
       ID: "0"
       INPUT_EXCHANGE: splitter
       MOM_HOST: rabbitmq
+      OUTPUT_EXCHANGE: splitter_output
       PYTHONUNBUFFERED: "1"
       STOPWORDS_PATH: /stopwords
   splitter_1:
@@ -942,13 +690,13 @@ services:
         condition: service_healthy
         required: true
     environment:
-      AGGREGATION_AMOUNT: "5"
-      OUTPUT_EXCHANGE: splitter_output
-      FILTER_LANGUAGE_AMOUNT: "5"
-      FILTER_YEAR_AMOUNT: "5"
+      AGGREGATION_AMOUNT: "3"
+      FILTER_LANGUAGE_AMOUNT: "3"
+      FILTER_YEAR_AMOUNT: "3"
       ID: "1"
       INPUT_EXCHANGE: splitter
       MOM_HOST: rabbitmq
+      OUTPUT_EXCHANGE: splitter_output
       PYTHONUNBUFFERED: "1"
       STOPWORDS_PATH: /stopwords
   splitter_2:
@@ -960,74 +708,28 @@ services:
         condition: service_healthy
         required: true
     environment:
-      AGGREGATION_AMOUNT: "5"
-      OUTPUT_EXCHANGE: splitter_output
-      FILTER_LANGUAGE_AMOUNT: "5"
-      FILTER_YEAR_AMOUNT: "5"
+      AGGREGATION_AMOUNT: "3"
+      FILTER_LANGUAGE_AMOUNT: "3"
+      FILTER_YEAR_AMOUNT: "3"
       ID: "2"
       INPUT_EXCHANGE: splitter
       MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
-      STOPWORDS_PATH: /stopwords
-  splitter_3:
-    build:
-      context: ./src
-      dockerfile: splitter/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-        required: true
-    environment:
-      AGGREGATION_AMOUNT: "5"
       OUTPUT_EXCHANGE: splitter_output
-      FILTER_LANGUAGE_AMOUNT: "5"
-      FILTER_YEAR_AMOUNT: "5"
-      ID: "3"
-      INPUT_EXCHANGE: splitter
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
-      STOPWORDS_PATH: /stopwords
-  splitter_4:
-    build:
-      context: ./src
-      dockerfile: splitter/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-        required: true
-    environment:
-      AGGREGATION_AMOUNT: "5"
-      OUTPUT_EXCHANGE: splitter_output
-      FILTER_LANGUAGE_AMOUNT: "5"
-      FILTER_YEAR_AMOUNT: "5"
-      ID: "4"
-      INPUT_EXCHANGE: splitter
-      MOM_HOST: rabbitmq
       PYTHONUNBUFFERED: "1"
       STOPWORDS_PATH: /stopwords
 volumes:
   aggregation_storage_0: null
   aggregation_storage_0_2: null
-  aggregation_storage_0_3: null
-  aggregation_storage_0_4: null
   aggregation_storage_1: null
   average_storage_0: null
   average_storage_0_2: null
-  average_storage_0_3: null
-  average_storage_0_4: null
   average_storage_1: null
   filter_average_storage_0: null
   filter_average_storage_0_2: null
-  filter_average_storage_0_3: null
-  filter_average_storage_0_4: null
   filter_average_storage_1: null
   filter_language_storage_0: null
   filter_language_storage_0_2: null
-  filter_language_storage_0_3: null
-  filter_language_storage_0_4: null
   filter_language_storage_1: null
   filter_year_storage_0: null
   filter_year_storage_0_2: null
-  filter_year_storage_0_3: null
-  filter_year_storage_0_4: null
   filter_year_storage_1: null

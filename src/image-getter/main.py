@@ -37,10 +37,6 @@ class ImageGetter:
         with urllib.request.urlopen(request, timeout=IMAGE_TIMEOUT) as response:
             self.output_exchange.send_to(serialize_msg(MsgType.Q2_RESULT, client_id, name, url, response.read()), routing_key=client_id)
 
-    def _report_download_error(self, client_id, name, url):
-        # Se mantiene el contrato de la Q2: el artículo aparece con la imagen vacía.
-        self.output_exchange.send_to(serialize_msg(MsgType.Q2_RESULT, client_id, name, url, b""), routing_key=client_id)
-
     def process_message(self, message, ack, nack):
         message_type, client_id, fields = deserialize_msg(message)
         if message_type == MsgType.GET_IMAGE:
@@ -48,7 +44,11 @@ class ImageGetter:
             try:
                 self._get_image(client_id, name, url, image_url)
             except Exception as error:
-                self._report_download_error(client_id, name, url)
+                if error.code == 403:
+                    nack()
+                    return
+                else:
+                    self.output_exchange.send_to(serialize_msg(MsgType.Q2_RESULT, client_id, name, url, b""), routing_key=client_id)
 
         elif message_type == MsgType.END_OF_RECORDS:
             self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
@@ -75,7 +75,11 @@ class ImageGetter:
         self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 def main():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s.%(msecs)03d | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     image_getter = ImageGetter()
     image_getter.start()
     return 0

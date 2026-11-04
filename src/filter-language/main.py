@@ -18,7 +18,7 @@ class FilterLanguage:
     def __init__(self):
         self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
+            MOM_HOST, INPUT_EXCHANGE, [f"words_{ID}"], consume=True
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ( 
             MOM_HOST, OUTPUT_EXCHANGE, [], consume=False
@@ -30,22 +30,20 @@ class FilterLanguage:
 
     def process_message(self, message, ack, nack):
         message_type, client_id, fields = deserialize_msg(message)
-        if message_type == MsgType.SPLIT_WORD:
-            word, language, url, date_modified, amount = fields
-
-            word_sent = self.words_by_client.get(client_id, {})
-            language_sent = word_sent.get(word, set())
-
-            if len(language_sent) == 2:
-                pass # Ya la mandé
-
-            elif language not in language_sent:
-                language_sent.add(language)
-                word_sent[word] = language_sent
-                self.words_by_client[client_id] = word_sent
-
+        if message_type == MsgType.WORD_BATCH:
+            language, words = fields
+            word_sent = self.words_by_client.setdefault(client_id, {})
+            for word in words:
+                language_sent = word_sent.get(word, set())
                 if len(language_sent) == 2:
-                    self.output_exchange.send_to(serialize_msg(MsgType.Q3_RESULT, client_id, word), routing_key=client_id) 
+                    continue
+                if language not in language_sent:
+                    language_sent.add(language)
+                    word_sent[word] = language_sent
+                    if len(language_sent) == 2:
+                        self.output_exchange.send_to(
+                            serialize_msg(MsgType.Q3_RESULT, client_id, word), routing_key=client_id
+                        )
 
         elif message_type == MsgType.END_OF_RECORDS:
             self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
@@ -73,7 +71,11 @@ class FilterLanguage:
         self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 def main():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s.%(msecs)03d | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     filter_average = FilterLanguage()
     filter_average.start()
     return 0
