@@ -56,11 +56,11 @@ class Splitter:
             word_count[word] = word_count.get(word, 0) + 1
 
         batches = {}
-        for word, amount in word_count.items():
+        for word in word_count:
             if self.shutdown.requested.is_set():
                 break
             key = hashing.get_hash_key(f"{client_id}_{word}", FILTER_LANGUAGE_AMOUNT)
-            batches.setdefault(key, []).append((word, amount))
+            batches.setdefault(key, []).append(word)
 
         for key, batch in batches.items():
             if self.shutdown.requested.is_set():

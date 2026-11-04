@@ -104,8 +104,8 @@ def _serialize_split_word(word, language, url, date_modified, amount):
 
 def _serialize_word_batch(language, words):
     parts = [_serialize_texts((language,)), len(words).to_bytes(UINT32_SIZE, "big")]
-    for word, amount in words:
-        parts.extend((_serialize_texts((word,)), amount.to_bytes(UINT32_SIZE, "big")))
+    for word in words:
+        parts.append(_serialize_texts((word,)))
     return b"".join(parts)
 
 
@@ -220,8 +220,7 @@ def _deserialize_word_batch(payload):
     words = []
     for _ in range(count):
         word, offset = _deserialize_text(payload, offset)
-        amount, offset = _deserialize_uint32(payload, offset)
-        words.append((word, amount))
+        words.append(word)
     _check_end(payload, offset)
     return language, words
 

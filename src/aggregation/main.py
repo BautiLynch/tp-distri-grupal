@@ -51,7 +51,7 @@ class AggregationFilter:
         if message_type == MsgType.WORD_BATCH:
             language, words = fields
             counts = self.words_by_client.setdefault(client_id, {})
-            for word, amount in words:
+            for word in words:
                 # Q4 cuenta abstracts que contienen la palabra, no repeticiones.
                 counts[word] = counts.get(word, 0) + 1
             

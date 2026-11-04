@@ -33,7 +33,7 @@ class FilterLanguage:
         if message_type == MsgType.WORD_BATCH:
             language, words = fields
             word_sent = self.words_by_client.setdefault(client_id, {})
-            for word, amount in words:
+            for word in words:
                 language_sent = word_sent.get(word, set())
                 if len(language_sent) == 2:
                     continue
