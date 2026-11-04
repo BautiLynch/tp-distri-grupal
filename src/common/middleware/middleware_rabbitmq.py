@@ -159,6 +159,8 @@ class MessageMiddlewareExchangeRabbitMQ(_MessageMiddlewareRabbitMQBase, MessageM
                 routing_key=routing_key,
             )
 
+        self.chan.basic_qos(prefetch_count=100)
+
     def send_to(self, message, routing_key):
         if isinstance(routing_key, int):
             routing_key = str(routing_key)
