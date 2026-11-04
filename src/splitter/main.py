@@ -16,8 +16,8 @@ STOPWORDS_PATH = os.environ.get("STOPWORDS_PATH", "stopwords")
 AGGREGATION_AMOUNT = int(os.environ["AGGREGATION_AMOUNT"])
 FILTER_YEAR_AMOUNT = int(os.environ["FILTER_YEAR_AMOUNT"])
 FILTER_LANGUAGE_AMOUNT = int(os.environ["FILTER_LANGUAGE_AMOUNT"])
-if not (AGGREGATION_AMOUNT == FILTER_YEAR_AMOUNT == FILTER_LANGUAGE_AMOUNT >= 1):
-    raise ValueError("aggregation, filter_year y filter_language deben tener la misma cantidad de replicas")
+if not (AGGREGATION_AMOUNT == FILTER_LANGUAGE_AMOUNT >= 1) or FILTER_YEAR_AMOUNT < 1:
+    raise ValueError("aggregation y filter_language deben tener la misma cantidad de replicas; filter_year debe tener al menos una")
 
 
 class Splitter:
@@ -26,7 +26,9 @@ class Splitter:
             MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, OUTPUT_EXCHANGE, [f"{index}" for index in range(FILTER_LANGUAGE_AMOUNT)], consume=False
+            MOM_HOST, OUTPUT_EXCHANGE,
+            [f"words.{index}" for index in range(FILTER_LANGUAGE_AMOUNT)]
+            + [f"urls.{index}" for index in range(FILTER_YEAR_AMOUNT)], consume=False
         )
 
         self.stopwords = self._load_stopwords("english") | self._load_stopwords("french")
@@ -51,12 +53,24 @@ class Splitter:
                 continue
             word_count[word] = word_count.get(word, 0) + 1
 
+        batches = {}
         for word, amount in word_count.items():
             key = hashing.get_hash_key(f"{client_id}_{word}", FILTER_LANGUAGE_AMOUNT)
+            batches.setdefault(key, []).append((word, amount))
+
+        for key, batch in batches.items():
             self.output_exchange.send_to(
-                serialize_msg(MsgType.SPLIT_WORD, client_id,
-                              word, language, url, date_modified, amount),
-                routing_key=key,
+                serialize_msg(MsgType.WORD_BATCH, client_id, language, batch),
+                routing_key=f"words.{key}",
+            )
+
+        # Excluir abstracts sin palabras validas conserva el denominador de Q5.
+        if word_count:
+            key = hashing.get_hash_key(f"{client_id}_{url}", FILTER_YEAR_AMOUNT)
+            self.output_exchange.send_to(
+                serialize_msg(MsgType.WORD_YEAR_AMOUNT, client_id,
+                              url, date_modified, sum(word_count.values())),
+                routing_key=f"urls.{key}",
             )
 
     def process_message(self, message, ack, nack):

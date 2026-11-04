@@ -16,6 +16,7 @@ class MsgType(IntEnum):
     FILTER_ARTICLE = auto()
     SPLIT_WORD = auto()
     BASELINE_END = auto()
+    WORD_BATCH = auto()
 
 
 UINT32_SIZE = 4
@@ -99,6 +100,13 @@ def _serialize_word_year_amount(url, date_modified, amount):
 
 def _serialize_split_word(word, language, url, date_modified, amount):
     return _serialize_texts((word, language, url, date_modified)) + amount.to_bytes(UINT32_SIZE, "big")
+
+
+def _serialize_word_batch(language, words):
+    parts = [_serialize_texts((language,)), len(words).to_bytes(UINT32_SIZE, "big")]
+    for word, amount in words:
+        parts.extend((_serialize_texts((word,)), amount.to_bytes(UINT32_SIZE, "big")))
+    return b"".join(parts)
 
 
 def _serialize_get_image(url, name, image_url):
@@ -206,6 +214,18 @@ def _deserialize_split_word(payload):
     return fields + (amount,)
 
 
+def _deserialize_word_batch(payload):
+    language, offset = _deserialize_text(payload, 0)
+    count, offset = _deserialize_uint32(payload, offset)
+    words = []
+    for _ in range(count):
+        word, offset = _deserialize_text(payload, offset)
+        amount, offset = _deserialize_uint32(payload, offset)
+        words.append((word, amount))
+    _check_end(payload, offset)
+    return language, words
+
+
 def _deserialize_get_image(payload):
     fields, offset = _deserialize_texts(payload, 3)
     _check_end(payload, offset)
@@ -260,6 +280,7 @@ def _deserialize_empty(payload):
 
 
 RECV_MSG_HANDLERS = {
+    MsgType.WORD_BATCH: _deserialize_word_batch,
     MsgType.BASELINE_END: _deserialize_empty,
     MsgType.SPLIT_WORD: _deserialize_split_word,
     MsgType.FILTER_ARTICLE: _deserialize_filter_article,
@@ -278,6 +299,7 @@ RECV_MSG_HANDLERS = {
 }
 
 SEND_MSG_HANDLERS = {
+    MsgType.WORD_BATCH: _serialize_word_batch,
     MsgType.BASELINE_END: _serialize_empty,
     MsgType.SPLIT_WORD: _serialize_split_word,
     MsgType.FILTER_ARTICLE: _serialize_filter_article,

@@ -14,6 +14,7 @@ WORKERS = (
 )
 GROUPS = (*WORKERS, "client")
 SPLITTER_CONSUMERS = ("filter_language", "aggregation", "filter_year")
+WORD_CONSUMERS = ("filter_language", "aggregation")
 SINGLETONS = ("rabbitmq", "gateway", "handler", "join")
 COUNTERS = {
     "FILTER_AMOUNT": "filter",
@@ -48,11 +49,11 @@ def scale_config(config, target, amount):
             raise ValueError(f"Falta el servicio base {group}_0 en el compose")
 
     counts = {group: len(items) for group, items in replicas.items()}
-    targets = WORKERS if target == "todos" else SPLITTER_CONSUMERS if target in SPLITTER_CONSUMERS else (target,)
+    targets = WORKERS if target == "todos" else WORD_CONSUMERS if target in WORD_CONSUMERS else (target,)
     for group in targets:
         counts[group] = amount
-    if len({counts[group] for group in SPLITTER_CONSUMERS}) != 1:
-        raise ValueError("filter_language, aggregation y filter_year deben tener la misma cantidad de replicas")
+    if len({counts[group] for group in WORD_CONSUMERS}) != 1:
+        raise ValueError("filter_language y aggregation deben tener la misma cantidad de replicas")
 
     volumes = config.setdefault("volumes", {})
     old_replica_volumes = set()

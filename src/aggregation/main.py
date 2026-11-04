@@ -19,7 +19,7 @@ class AggregationFilter:
 
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
+            MOM_HOST, INPUT_EXCHANGE, [f"words.{ID}"], consume=True
         )
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, OUTPUT_QUEUE
@@ -50,11 +50,12 @@ class AggregationFilter:
 
     def process_message(self, message, ack, nack):
         message_type, client_id, fields = deserialize_msg(message)
-        if message_type == MsgType.SPLIT_WORD:
-            word, language, url, date_modified, amount = fields
-            self.words_by_client[client_id] = self.words_by_client.get(client_id, {})
-            self.words_by_client[client_id][word] = self.words_by_client[client_id].get(word, 0) + 1
-            #self.storage.store_key(client_id, key, 1)
+        if message_type == MsgType.WORD_BATCH:
+            language, words = fields
+            counts = self.words_by_client.setdefault(client_id, {})
+            for word, amount in words:
+                # Q4 cuenta abstracts que contienen la palabra, no repeticiones.
+                counts[word] = counts.get(word, 0) + 1
             
         elif message_type == MsgType.END_OF_RECORDS:
             self._process_eof(client_id)

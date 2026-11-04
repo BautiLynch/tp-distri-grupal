@@ -23,7 +23,7 @@ class FilterYear:
 
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
+            MOM_HOST, INPUT_EXCHANGE, [f"urls.{ID}"], consume=True
         )
         self.output_exchange_average = middleware.MessageMiddlewareExchangeRabbitMQ( 
             MOM_HOST, AVERAGE_EXCHANGE, [f"{index}" for index in range(AVERAGE_AMOUNT)], consume=False
@@ -39,18 +39,16 @@ class FilterYear:
 
     def process_message(self, message, ack, nack):
         message_type, client_id, fields = deserialize_msg(message)
-        if message_type == MsgType.SPLIT_WORD:
-            word, language, url, date_modified, amount = fields
-            output_message = serialize_msg(MsgType.WORD_YEAR_AMOUNT, client_id,
-                                           url, date_modified, amount)
+        if message_type == MsgType.WORD_YEAR_AMOUNT:
+            url, date_modified, amount = fields
             
             # Los articulos hasta YEAR alimentan el promedio en todos los filtros.
             if datetime.fromisoformat(date_modified.replace("Z", "+00:00")).year <= YEAR:
-                self.output_exchange_filter_average.send(output_message)
+                self.output_exchange_filter_average.send(message)
             # Los posteriores se acumulan por URL en un unico Average.
             else:
                 key = hashing.get_hash_key(f"{client_id}_{url}", AVERAGE_AMOUNT)
-                self.output_exchange_average.send_to(output_message, routing_key=key)
+                self.output_exchange_average.send_to(message, routing_key=key)
 
         elif message_type == MsgType.END_OF_RECORDS:
             self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1

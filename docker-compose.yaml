@@ -170,6 +170,66 @@ services:
         source: ./output
         target: /output
         type: bind
+  client_1:
+    build:
+      context: ./src
+      dockerfile: client/Dockerfile
+    depends_on:
+      gateway:
+        condition: service_started
+        required: true
+      handler:
+        condition: service_started
+        required: true
+    environment:
+      CONNECTION_TIMEOUT: "10"
+      GATEWAY_HOST: gateway
+      GATEWAY_PORT: "5678"
+      INPUT_PATH: /datasets/2.jsonl
+      OUTPUT_PATH: /output/output_1.bin
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - bind:
+          create_host_path: true
+        read_only: true
+        source: ./datasets
+        target: /datasets
+        type: bind
+      - bind:
+          create_host_path: true
+        source: ./output
+        target: /output
+        type: bind
+  client_2:
+    build:
+      context: ./src
+      dockerfile: client/Dockerfile
+    depends_on:
+      gateway:
+        condition: service_started
+        required: true
+      handler:
+        condition: service_started
+        required: true
+    environment:
+      CONNECTION_TIMEOUT: "10"
+      GATEWAY_HOST: gateway
+      GATEWAY_PORT: "5678"
+      INPUT_PATH: /datasets/3.jsonl
+      OUTPUT_PATH: /output/output_2.bin
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - bind:
+          create_host_path: true
+        read_only: true
+        source: ./datasets
+        target: /datasets
+        type: bind
+      - bind:
+          create_host_path: true
+        source: ./output
+        target: /output
+        type: bind
   filter_0:
     build:
       context: ./src
