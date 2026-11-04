@@ -1,10 +1,71 @@
-docker compose --progress quiet up --build --quiet-build --menu=false --remove-orphans 2>&1 | tee ejecucion.log
+# Wikipedia Article Analysis
 
-python tools/instancias.py client 1 --compose-file docker-compose.yaml
+Facultad de Ingeniería de la Universidad de Buenos Aires (FIUBA)
 
-python3 scripts/download_wikipedia.py --articles 100000
+| Nombre | Padrón | Email |
+| --- | --- | --- |
+| Bautista Lynch | 108791 | blynch@fi.uba.ar |
+| Joaquín Batemarco | 110222 | jbatemarco@fi.uba.ar |
+| Benicio Braunstein | 110126 | bbraunstein@fi.uba.ar |
 
-python3 tools/verificar.py --referencia output/referencia.json output/output_0.bin
+## Requisitos
 
+- Docker con Docker Compose
+- Make y Bash
+- Python 3.11 o superior, disponible como `python3` (las herramientas no usan paquetes externos)
 
-Ejecucion serial: python3 tools/serial.py datasets/wikipedia-250000.jsonl --output test/referencia-250000.json
+## Preparar los datos
+
+```bash
+make setup GB=1.5
+```
+
+Descarga una muestra del dataset del tamaño indicado y calcula los resultados esperados con una ejecución serial. Genera:
+
+- `datasets/1.jsonl`, `2.jsonl` y `3.jsonl`: una copia del dataset para cada uno de los 3 clientes.
+- `test/referencia.json`: resultados esperados para la verificación.
+
+## Ejecutar
+
+```bash
+make
+```
+
+Levanta el sistema, muestra los logs, espera a que terminen los clientes, verifica sus resultados contra la referencia y baja los contenedores. El resultado queda en `verificacion.log` y los logs en `ejecucion.log`.
+
+Las salidas de los clientes se guardan en `output/output_<n>.bin`.
+
+### Paso a paso
+
+```bash
+make up
+```
+
+```bash
+make logs
+```
+
+```bash
+make verify
+```
+
+```bash
+make down
+```
+
+Ejecutá `make verify` cuando hayan terminado los clientes.
+
+## Escalar
+
+Para cambiar la cantidad de instancias de un worker o de clientes:
+
+```bash
+python3 tools/instancias.py <servicio> <cantidad> --compose-file docker-compose.yaml
+```
+
+`<servicio>` puede ser `filter`, `image_getter`, `splitter`, `filter_language`, `aggregation`, `filter_year`, `average`, `filter_average`, `client` o `todos` (todos los workers, sin clientes).
+
+- `filter_language` y `aggregation` siempre se escalan juntos.
+- `rabbitmq`, `gateway`, `handler` y `join` tienen una sola instancia.
+- El comando modifica `docker-compose.yaml`, pero no inicia contenedores.
+- Los clientes que se agregan copian la configuración de `client_0`, así que leen `datasets/1.jsonl`.
