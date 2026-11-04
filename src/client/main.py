@@ -104,8 +104,11 @@ class Client:
                 write_all(output, record)
                 output.flush()
         except Exception as error:
-            self.receiver_errors.put(error)
-            self.stop()
+            # Al apagarnos cerramos los sockets a proposito, asi que el error
+            # del receiver es esperado y no tiene que reportarse como fallo.
+            if not self.stopping.is_set():
+                self.receiver_errors.put(error)
+                self.stop()
         finally:
             self.receiver_ready.set()
 
@@ -126,6 +129,14 @@ class Client:
         if os.path.samestat(os.fstat(source.fileno()), output_stat):
             raise ValueError("INPUT_PATH and OUTPUT_PATH must be different files")
 
+    def _join_receiver(self, receiver):
+        # Espera a que llegue el END_OF_RECORDS, pero no bloquea la salida si
+        # el apagado ya fue pedido.
+        while receiver.is_alive():
+            receiver.join(timeout=0.5)
+            if self.stopping.is_set():
+                return
+
     def run(self):
         receiver = None
         with open(self.input_path, "rb") as source:
@@ -140,12 +151,14 @@ class Client:
                         target=self._receive_results,
                         args=(handler, client_id, output),
                         name="result-receiver",
+                        daemon=True,
                     )
                     receiver.start()
-                    self.receiver_ready.wait()
+                    if not self.receiver_ready.wait(timeout=self.connection_timeout):
+                        raise TimeoutError("Timed out waiting for the result receiver")
                     self._check_stopping()
                     self._send_records(gateway, source)
-                    receiver.join()
+                    self._join_receiver(receiver)
                     self._check_stopping()
                     logging.info("Client %s completed; results saved to %s",
                                  client_id, self.output_path)
@@ -155,7 +168,7 @@ class Client:
                 finally:
                     self.stop()
                     if receiver is not None and receiver.ident is not None:
-                        receiver.join()
+                        receiver.join(timeout=self.connection_timeout)
                     with self.connections_lock:
                         for connection in self.connections:
                             connection.close()
@@ -167,7 +180,9 @@ def main():
     started_at = time.perf_counter()
     logging.info("Client started")
     completed = False
+    interrupted = False
     previous_handlers = {}
+    client = None
     try:
         client = Client(
             os.environ["GATEWAY_HOST"], int(os.environ["GATEWAY_PORT"]),
@@ -179,13 +194,19 @@ def main():
         client.run()
         completed = True
     except Exception:
-        logging.exception("Client failed")
-        return 1
+        if client is not None and client.stopping.is_set():
+            # Un SIGTERM/SIGINT pidio el apagado: no es un fallo.
+            interrupted = True
+            logging.info("Client interrupted by signal; exiting cleanly")
+        else:
+            logging.exception("Client failed")
+            return 1
     finally:
         for sig, previous in previous_handlers.items():
             signal.signal(sig, previous)
         elapsed = time.perf_counter() - started_at
-        logging.info("Client finished; status=%s", "success" if completed else "failed")
+        logging.info("Client finished; status=%s",
+                     "success" if completed or interrupted else "failed")
         logging.info("Client total duration: %.3f seconds", elapsed)
     return 0
 

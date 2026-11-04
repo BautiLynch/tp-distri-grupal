@@ -1,10 +1,9 @@
 import os
 import logging
-import signal
-import threading
 
 from datetime import datetime
 from common import middleware, hashing
+from common.shutdown import GracefulShutdown
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 
 ID = os.environ["ID"]
@@ -22,6 +21,7 @@ YEAR = int(os.environ.get("YEAR"))
 class FilterYear:
 
     def __init__(self):
+        self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
         )
@@ -33,9 +33,6 @@ class FilterYear:
         )
 
         self.eof_by_client = {}
-
-        self.end_event = threading.Event()
-        signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def process_message(self, message, ack, nack):
         message_type, client_id, fields = deserialize_msg(message)
@@ -68,12 +65,6 @@ class FilterYear:
     def _release_client(self, client_id):
         self.eof_by_client.pop(client_id, None)
 
-    def sigterm_handler(self, signum, frame):
-        if self.end_event.is_set():
-            return
-        self.end_event.set()
-        self.input_exchange.stop_consuming_threadsafe()
-
     def close(self):
         for mom in [self.input_exchange, self.output_exchange_average, self.output_exchange_filter_average]:
             try:
@@ -82,10 +73,7 @@ class FilterYear:
                 logging.error(f"Error closing message middleware: {e}")
 
     def start(self):
-        try:
-            self.input_exchange.start_consuming(self.process_message)
-        finally:
-            self.close()
+        self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 def main():
     logging.basicConfig(level=logging.INFO)
@@ -95,4 +83,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

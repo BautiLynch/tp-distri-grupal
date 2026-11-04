@@ -2,6 +2,7 @@ import os
 import logging
 import socket
 import signal
+import threading
 import multiprocessing
 
 from common import middleware
@@ -135,14 +136,16 @@ def handle_client_response(client_socket, connection_id, client_dict, worker_pid
         worker_pids.pop(connection_id, None)
 
 
-def handle_sigterm(server_socket, client_dict, worker_pids, sigterm_received):
+def stop_clients(client_dict, worker_pids, sigterm_received):
     sigterm_received.value = 1
-    for connection in [server_socket, *client_dict.values()]:
+    # El shutdown del socket de escucha no despierta accept() en Linux, por eso
+    # el loop principal usa un timeout y chequea el flag de apagado.
+    for connection in list(client_dict.values()):
         try:
             connection.shutdown(socket.SHUT_RDWR)
         except socket.error as error:
             logging.debug("Socket already disconnected during shutdown: %s", error)
-    for worker_pid in worker_pids.values():
+    for worker_pid in list(worker_pids.values()):
         try:
             os.kill(worker_pid, signal.SIGTERM)
         except ProcessLookupError:
@@ -151,6 +154,14 @@ def handle_sigterm(server_socket, client_dict, worker_pids, sigterm_received):
 
 def main():
     logging.basicConfig(level=logging.INFO)
+    shutdown_requested = threading.Event()
+
+    def request_shutdown(signum, frame):
+        shutdown_requested.set()
+
+    signal.signal(signal.SIGTERM, request_shutdown)
+    signal.signal(signal.SIGINT, request_shutdown)
+
     with multiprocessing.Manager() as manager:
         client_dict = manager.dict()
         worker_pids = manager.dict()
@@ -163,15 +174,10 @@ def main():
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
                 server_socket.bind((SERVER_HOST, SERVER_PORT))
                 server_socket.listen()
-                signal.signal(
-                    signal.SIGTERM,
-                    lambda signum, frame: handle_sigterm(
-                        server_socket, client_dict, worker_pids, sigterm_received
-                    ),
-                )
+                server_socket.settimeout(0.5)
                 connection_id = 0
                 try:
-                    while True:
+                    while not shutdown_requested.is_set():
                         try:
                             client_socket, _ = server_socket.accept()
                             connection_id += 1
@@ -182,16 +188,17 @@ def main():
                                  worker_pids, sigterm_received),
                                 callback=lambda _, connection=client_socket: connection.close(),
                             )
+                        except socket.timeout:
+                            continue
                         except socket.error:
-                            if not sigterm_received.value:
+                            if not shutdown_requested.is_set():
                                 logging.exception("The connection with the client was lost")
                                 return 1
-                            return 0
                         except Exception:
                             logging.exception("Error accepting a client")
                             return 2
                 finally:
-                    handle_sigterm(server_socket, client_dict, worker_pids, sigterm_received)
+                    stop_clients(client_dict, worker_pids, sigterm_received)
                     processes_pool.close()
                     processes_pool.join()
     return 0

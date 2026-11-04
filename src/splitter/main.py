@@ -1,9 +1,8 @@
 import os
 import logging
-import signal
-import threading
 
 from common import middleware, hashing
+from common.shutdown import GracefulShutdown
 from common.message_protocol.internal import MsgType, serialize_msg, deserialize_msg
 
 ID = os.environ["ID"]
@@ -21,6 +20,7 @@ if not (AGGREGATION_AMOUNT == FILTER_YEAR_AMOUNT == FILTER_LANGUAGE_AMOUNT >= 1)
 
 class Splitter:
     def __init__(self):
+        self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
         )
@@ -32,8 +32,6 @@ class Splitter:
         self.fr_stopwords = self._load_stopwords("french")
 
         self.word_count = {}
-        self.end_event = threading.Event()
-        signal.signal(signal.SIGTERM, self.sigterm_handler)
 
     def _load_stopwords(self, language):
         file_path = os.path.join(STOPWORDS_PATH, f"{language}.txt")
@@ -53,6 +51,9 @@ class Splitter:
             self.word_count[word] = self.word_count.get(word, 0) + 1
 
         for word, amount in self.word_count.items():
+            if self.shutdown.requested.is_set():
+                break
+
             key = hashing.get_hash_key(f"{client_id}_{word}", FILTER_LANGUAGE_AMOUNT)
 
             self.output_exchange.send_to(
@@ -97,16 +98,7 @@ class Splitter:
                 logging.error(f"Error closing message middleware: {e}")
 
     def start(self):
-        try:
-            self.input_exchange.start_consuming(self.process_message)
-        finally:
-            self.close()
-
-    def sigterm_handler(self, signum, frame):
-        if self.end_event.is_set():
-            return
-        self.end_event.set()
-        self.input_exchange.stop_consuming_threadsafe()
+        self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 def main():
     logging.basicConfig(level=logging.INFO)
@@ -116,4 +108,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
