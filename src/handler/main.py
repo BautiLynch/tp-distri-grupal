@@ -28,6 +28,7 @@ if any(amount < 1 for amount in QUERY_REPLICAS.values()):
 class ClientHandler:
     def __init__(self, client_socket):
         self.client_socket = client_socket
+        self.client_id = None
         self.input_exchange = None
         self.query_end_counts = {
             "q1": 0,
@@ -46,6 +47,7 @@ class ClientHandler:
         )
         if message_type != ExternalMsgType.CLIENT_ID:
             raise ValueError("Expected a client ID to register the connection")
+        self.client_id = client_id
         if self.stopping:
             return
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
@@ -72,7 +74,7 @@ class ClientHandler:
                 if self.query_end_counts[query_name] == QUERY_REPLICAS[query_name]:
                     logging.info(
                         "Client %s completed query %s",
-                        self.client_socket.getpeername(),
+                        self.client_id,
                         query_name,
                     )
                     self.completed_queries.add(query_name)
@@ -126,6 +128,8 @@ def handle_client_response(client_socket, connection_id, client_dict, worker_pid
         worker_pids[connection_id] = os.getpid()
         if not sigterm_received.value and not client_handler.stopping:
             client_handler.run()
+    except (ConnectionError, EOFError):
+        logging.info("Client connection %s closed by the client", connection_id)
     except Exception:
         if not client_handler.stopping:
             logging.exception("Client connection %s failed", connection_id)
