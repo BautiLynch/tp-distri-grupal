@@ -106,7 +106,11 @@ def handle_sigterm(server_socket, client_dict, sigterm_received): # TODO: Se sup
 
 
 def main():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s.%(msecs)03d | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
     with multiprocessing.Manager() as manager:
         client_dict = manager.dict()

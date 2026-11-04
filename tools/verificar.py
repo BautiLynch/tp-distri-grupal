@@ -72,8 +72,6 @@ def client_outputs(compose_file, wait):
                if {"INPUT_PATH", "OUTPUT_PATH"} <= service.get("environment", {}).keys()}
     if not clients:
         raise ValueError("El Compose no tiene clientes con INPUT_PATH y OUTPUT_PATH")
-    if len({local_file(service, "INPUT_PATH") for service in clients.values()}) != 1:
-        raise ValueError("Los clientes deben compartir la entrada para usar una sola referencia")
     outputs = [local_file(service, "OUTPUT_PATH") for service in clients.values()]
     if len(set(outputs)) != len(outputs):
         raise ValueError("Hay clientes que escriben en el mismo archivo de salida")

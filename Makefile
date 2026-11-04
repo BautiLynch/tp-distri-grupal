@@ -12,15 +12,15 @@ logs:
 	docker compose logs --follow
 
 test: up
-	@setsid docker compose logs --follow --no-color 2>&1 & \
+	@docker compose logs --follow 2>&1 & \
 	logs_pid=$$!; \
-	trap 'kill -- -$$logs_pid 2>/dev/null || true' EXIT; \
+	trap 'kill "$$logs_pid" 2>/dev/null || true' EXIT; \
 	python3 tools/verificar.py --referencia "$(REFERENCIA)" --compose docker-compose.yaml --wait > verificacion.log 2>&1; \
 	status=$$?; \
-	kill -- -$$logs_pid 2>/dev/null; \
+	kill "$$logs_pid" 2>/dev/null || true; \
 	wait $$logs_pid 2>/dev/null; \
 	trap - EXIT; \
-	docker compose logs --no-color >> ejecucion.log; \
+	docker compose logs >> ejecucion.log; \
 	docker compose down || status=$$?; \
 	cat verificacion.log; \
 	exit $$status

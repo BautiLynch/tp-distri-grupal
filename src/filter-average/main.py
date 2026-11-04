@@ -112,7 +112,11 @@ class FilterAverage:
             self.close()
 
 def main():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s.%(msecs)03d | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     filter_average = FilterAverage()
     filter_average.start()
     return 0

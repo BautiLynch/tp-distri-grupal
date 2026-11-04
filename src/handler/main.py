@@ -150,12 +150,21 @@ def handle_sigterm(server_socket, client_dict, worker_pids, sigterm_received):
 
 
 def initialize_worker():
-    logging.basicConfig(level=logging.INFO, force=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        force=True,
+        format="%(asctime)s.%(msecs)03d | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
 
 def main():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s.%(msecs)03d | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     with multiprocessing.Manager() as manager:
         client_dict = manager.dict()
         worker_pids = manager.dict()
