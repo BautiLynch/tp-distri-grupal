@@ -2,18 +2,19 @@ SHELL := /bin/bash
 .SHELLFLAGS := -o pipefail -c
 .DEFAULT_GOAL := test
 REFERENCIA ?= test/referencia.json
-ARTICULOS ?= 400000
+GB ?=
 
 .PHONY: setup up logs test run verify down
 
 setup:
-	@[[ "$(ARTICULOS)" =~ ^[1-9][0-9]*$$ ]] || { echo "ARTICULOS debe ser un entero positivo"; exit 1; }
 	@mkdir -p datasets "$$(dirname "$(REFERENCIA)")"
 	@set -e; \
+	gb="$(GB)"; \
+	if [ -z "$$gb" ]; then read -r -p 'Cantidad de GB del dataset (ej. 1.5): ' gb; fi; \
 	workdir=$$(mktemp -d datasets/.setup-XXXXXX); \
 	trap 'rm -rf "$$workdir"' EXIT; \
-	python3 tools/download_wikipedia.py --articles "$(ARTICULOS)" --output "$$workdir"; \
-	mv "$$workdir/wikipedia-$(ARTICULOS).jsonl" "$$workdir/1.jsonl"; \
+	python3 tools/download_wikipedia.py --gigabytes "$$gb" --output "$$workdir/descarga"; \
+	mv "$$workdir/descarga/wikipedia.jsonl" "$$workdir/1.jsonl"; \
 	python3 tools/serial.py "$$workdir/1.jsonl" --output "$$workdir/referencia.json"; \
 	mv "$$workdir/1.jsonl" datasets/1.jsonl; \
 	cp datasets/1.jsonl datasets/2.jsonl; \
