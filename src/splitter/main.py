@@ -29,8 +29,8 @@ class Splitter:
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, OUTPUT_EXCHANGE,
-            [f"words.{index}" for index in range(FILTER_LANGUAGE_AMOUNT)]
-            + [f"urls.{index}" for index in range(FILTER_YEAR_AMOUNT)], consume=False
+            [f"words_{index}" for index in range(FILTER_LANGUAGE_AMOUNT)]
+            + [f"urls_{index}" for index in range(FILTER_YEAR_AMOUNT)], consume=False
         )
 
         self.stopwords = self._load_stopwords("english") | self._load_stopwords("french")
@@ -67,7 +67,7 @@ class Splitter:
                 break
             self.output_exchange.send_to(
                 serialize_msg(MsgType.WORD_BATCH, client_id, language, batch),
-                routing_key=f"words.{key}",
+                routing_key=f"words_{key}",
             )
 
         # Excluir abstracts sin palabras validas conserva el denominador de Q5.
@@ -76,7 +76,7 @@ class Splitter:
             self.output_exchange.send_to(
                 serialize_msg(MsgType.WORD_YEAR_AMOUNT, client_id,
                               url, date_modified, sum(word_count.values())),
-                routing_key=f"urls.{key}",
+                routing_key=f"urls_{key}",
             )
 
     def process_message(self, message, ack, nack):

@@ -23,7 +23,7 @@ class FilterYear:
     def __init__(self):
         self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [f"urls.{ID}"], consume=True
+            MOM_HOST, INPUT_EXCHANGE, [f"urls_{ID}"], consume=True
         )
         self.output_exchange_average = middleware.MessageMiddlewareExchangeRabbitMQ( 
             MOM_HOST, AVERAGE_EXCHANGE, [f"{index}" for index in range(AVERAGE_AMOUNT)], consume=False

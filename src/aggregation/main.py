@@ -19,7 +19,7 @@ class AggregationFilter:
     def __init__(self):
         self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [f"words.{ID}"], consume=True
+            MOM_HOST, INPUT_EXCHANGE, [f"words_{ID}"], consume=True
         )
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, OUTPUT_QUEUE
