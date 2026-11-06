@@ -8,6 +8,7 @@ import threading
 import time
 
 from common.message_protocol import external
+from results import ResultWriter
 
 
 def expect_message(connection, expected_type):
@@ -17,25 +18,19 @@ def expect_message(connection, expected_type):
     return payload
 
 
-def write_all(output, data):
-    remaining = memoryview(data)
-    while remaining:
-        written = output.write(remaining)
-        if written is None or written <= 0:
-            raise OSError("Could not write a complete result")
-        remaining = remaining[written:]
-
-
 class Client:
-    def __init__(self, gateway_host, gateway_port, input_path, output_path,
-                 connection_timeout=10):
+    def __init__(self, gateway_host, gateway_port, input_path, output_dir,
+                 connection_timeout=10, q2_image_limit=0):
         if not gateway_host or not 1 <= gateway_port <= 65535:
             raise ValueError("Invalid gateway address")
         if not math.isfinite(connection_timeout) or connection_timeout <= 0:
             raise ValueError("CONNECTION_TIMEOUT must be positive and finite")
+        if q2_image_limit < 0:
+            raise ValueError("Q2_IMAGE_LIMIT must not be negative")
         self.gateway_address = (gateway_host, gateway_port)
         self.input_path = input_path
-        self.output_path = output_path
+        self.output_dir = output_dir
+        self.q2_image_limit = q2_image_limit
         self.connection_timeout = connection_timeout
         self.stopping = threading.Event()
         self.receiver_ready = threading.Event()
@@ -98,12 +93,9 @@ class Client:
                 message_type, payload = external.recv_msg(connection)
                 if message_type == external.MsgType.END_OF_RECORDS:
                     return
-                if message_type == external.MsgType.RESULT:
-                    record = external.serialize_msg(message_type, *payload)
-                else:
+                if message_type != external.MsgType.RESULT:
                     raise ValueError(f"Unexpected handler message {message_type}")
-                write_all(output, record)
-                output.flush()
+                output.write(*payload)
         except Exception as error:
             if not self.stopping.is_set():
                 self.receiver_errors.put(error)
@@ -119,14 +111,6 @@ class Client:
         external.send_msg(connection, external.MsgType.END_OF_RECORDS)
         logging.info("Client sent all records")
 
-    def _validate_output(self, source):
-        try:
-            output_stat = os.stat(self.output_path)
-        except FileNotFoundError:
-            return
-        if os.path.samestat(os.fstat(source.fileno()), output_stat):
-            raise ValueError("INPUT_PATH and OUTPUT_PATH must be different files")
-
     def _join_receiver(self, receiver):
         while receiver.is_alive():
             receiver.join(timeout=0.5)
@@ -136,8 +120,7 @@ class Client:
     def run(self):
         receiver = None
         with open(self.input_path, "rb") as source:
-            self._validate_output(source)
-            with open(self.output_path, "wb") as output:
+            with ResultWriter(self.output_dir, self.q2_image_limit) as output:
                 try:
                     gateway = self._connect(self.gateway_address, attempts=3)
                     client_id = expect_message(gateway, external.MsgType.CLIENT_ID)
@@ -157,7 +140,7 @@ class Client:
                     self._join_receiver(receiver)
                     self._check_stopping()
                     logging.info("Client %s completed; results saved to %s",
-                                 client_id, self.output_path)
+                                 client_id, self.output_dir)
                 except Exception:
                     self._raise_receiver_error()
                     raise
@@ -186,8 +169,9 @@ def main():
     try:
         client = Client(
             os.environ["GATEWAY_HOST"], int(os.environ["GATEWAY_PORT"]),
-            os.environ["INPUT_PATH"], os.environ["OUTPUT_PATH"],
+            os.environ["INPUT_PATH"], os.environ["OUTPUT_DIR"],
             float(os.environ.get("CONNECTION_TIMEOUT", "10")),
+            int(os.environ.get("Q2_IMAGE_LIMIT", "10")),
         )
         for sig in (signal.SIGTERM, signal.SIGINT):
             previous_handlers[sig] = signal.signal(sig, lambda signum, frame: client.stop())

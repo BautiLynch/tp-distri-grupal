@@ -5,14 +5,14 @@ dataset ni recalcular las consultas. Sin esa opcion se calculan desde el dataset
 con las mismas reglas de normalizacion, stopwords y conteo.
 
 Uso:
-    python3 tools/verificar.py --referencia output/referencia.json output/output_0.bin
+    python3 tools/verificar.py --referencia output/referencia.json output/cliente_0
     py -3 tools/verificar.py
-    py -3 tools/verificar.py --dataset datasets/wikipedia-1000-v2.jsonl output/output_v2_0.bin
-    py -3 tools/verificar.py --dataset datasets/wikipedia-1000-v2.jsonl output/*.bin
+    py -3 tools/verificar.py --dataset datasets/wikipedia-1000-v2.jsonl output/cliente_0
+    py -3 tools/verificar.py --dataset datasets/wikipedia-1000-v2.jsonl output/cliente_*
 
 Con --compose se toman las salidas de los clientes del Compose vigente.
 --wait espera a que esos clientes terminen y comprueba sus codigos de salida.
-Sin --compose ni archivos de salida, se usan todos los output/*.bin.
+Sin --compose ni carpetas de salida, se usan todas las output/cliente_*.
 Sale con codigo 0 si todo coincide y 1 si hay diferencias.
 """
 
@@ -33,14 +33,6 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 RESULT = 6
 UINT32_SIZE = 4
-
-QUERY_NAMES = {
-    1: "Q1",
-    2: "Q2",
-    3: "Q3",
-    4: "Q4",
-    5: "Q5",
-}
 
 
 # --------------------------------------------------------------------------- #
@@ -69,12 +61,12 @@ def client_outputs(compose_file, wait):
     compose = ["docker", "compose", "-f", compose_file]
     config = json.loads(subprocess.check_output(compose + ["config", "--format", "json"], text=True))
     clients = {name: service for name, service in config["services"].items()
-               if {"INPUT_PATH", "OUTPUT_PATH"} <= service.get("environment", {}).keys()}
+               if {"INPUT_PATH", "OUTPUT_DIR"} <= service.get("environment", {}).keys()}
     if not clients:
-        raise ValueError("El Compose no tiene clientes con INPUT_PATH y OUTPUT_PATH")
-    outputs = [local_file(service, "OUTPUT_PATH") for service in clients.values()]
+        raise ValueError("El Compose no tiene clientes con INPUT_PATH y OUTPUT_DIR")
+    outputs = [local_file(service, "OUTPUT_DIR") for service in clients.values()]
     if len(set(outputs)) != len(outputs):
-        raise ValueError("Hay clientes que escriben en el mismo archivo de salida")
+        raise ValueError("Hay clientes que escriben en la misma carpeta de salida")
     for name, output in zip(clients, outputs):
         print(f"cliente: {name} -> {output}")
     if wait:
@@ -230,7 +222,7 @@ def expected_results(articles, stopwords, year, language, sections, top_size):
 
 
 # --------------------------------------------------------------------------- #
-# Lectura de los .bin de salida
+# Lectura de las carpetas de salida
 # --------------------------------------------------------------------------- #
 def read_records(path):
     with open(path, "rb") as handle:
@@ -258,79 +250,70 @@ def read_uint32(payload, offset):
     return struct.unpack(">I", payload[offset:offset + 4])[0], offset + 4
 
 
-def parse_payload(query, payload):
-    if query == 1:
-        url, offset = read_text(payload, 0)
-        date_modified, offset = read_text(payload, offset)
-        parsed = (url, date_modified)
-    elif query == 2:
-        name, offset = read_text(payload, 0)
-        url, offset = read_text(payload, offset)
-        size, offset = read_uint32(payload, offset)
-        offset += size
-        parsed = ((name, url), size)
-    elif query == 3:
-        parsed, offset = read_text(payload, 0)
-    elif query == 4:
-        count, offset = read_uint32(payload, 0)
-        items = []
-        for _ in range(count):
-            word, offset = read_text(payload, offset)
-            amount, offset = read_uint32(payload, offset)
-            items.append((word, amount))
-        parsed = items
-    elif query == 5:
-        url, offset = read_text(payload, 0)
-        amount, offset = read_uint32(payload, offset)
-        parsed = (url, amount)
-    else:
-        raise ValueError(f"query desconocida: {query}")
+def parse_q2_record(payload):
+    name, offset = read_text(payload, 0)
+    url, offset = read_text(payload, offset)
+    size, offset = read_uint32(payload, offset)
+    offset += size
     if offset != len(payload):
-        raise ValueError(f"Q{query}: payload truncado o con bytes sobrantes")
-    return parsed
+        raise ValueError("Q2: payload truncado o con bytes sobrantes")
+    return name, url, size
+
+
+def load_json(path):
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def verify_q2_images(path, records):
+    q2_dir = os.path.join(path, "q2")
+    binary = collections.Counter()
+    for record in records:
+        location = record["image"]
+        if location is None:
+            if record["image_size"] != 0:
+                raise ValueError(f"Q2: imagen sin ubicacion: {record['url']}")
+        elif location == "resto.bin":
+            binary[(record["name"], record["url"], record["image_size"])] += 1
+        elif os.path.getsize(os.path.join(q2_dir, location)) != record["image_size"]:
+            raise ValueError(f"Q2: tamano incorrecto en {location}")
+
+    stored = collections.Counter()
+    for kind, query, payload in read_records(os.path.join(q2_dir, "resto.bin")):
+        if kind != RESULT or query != 2:
+            raise ValueError(f"registro inesperado en resto.bin: {kind}, {query}")
+        stored[parse_q2_record(payload)] += 1
+    if stored != binary:
+        raise ValueError("Q2: resto.bin no coincide con q2.json")
 
 
 def received_results(path):
-    q1 = collections.Counter()
-    q2 = collections.Counter()
-    q2_sizes = {}
-    q3 = set()
-    q4 = {}
-    q5 = {}
-    unknown = collections.Counter()
-    top_received = False
+    q1 = collections.Counter(
+        (record["url"], record["date_modified"])
+        for record in load_json(os.path.join(path, "q1.json"))
+    )
 
-    for kind, query, payload in read_records(path):
-        if kind != RESULT:
-            raise ValueError(f"tipo de registro inesperado: {kind}")
-        if query not in QUERY_NAMES:
-            unknown[query] += 1
-            continue
-        parsed = parse_payload(query, payload)
-        if query == 1:
-            q1[parsed] += 1
-        elif query == 2:
-            key, size = parsed
-            q2[key] += 1
-            q2_sizes[key] = size
-        elif query == 3:
-            if parsed in q3:
-                raise ValueError(f"Q3: palabra duplicada: {parsed}")
-            q3.add(parsed)
-        elif query == 4:
-            if top_received or len(dict(parsed)) != len(parsed):
-                raise ValueError("Q4: top duplicado o con palabras repetidas")
-            top_received = True
-            q4 = dict(parsed)
-        elif query == 5:
-            url, amount = parsed
-            if url in q5:
-                raise ValueError(f"Q5: URL duplicada: {url}")
-            q5[url] = amount
+    q2_records = load_json(os.path.join(path, "q2", "q2.json"))
+    verify_q2_images(path, q2_records)
+    q2 = collections.Counter((record["name"], record["url"]) for record in q2_records)
+    q2_sizes = {(record["name"], record["url"]): record["image_size"] for record in q2_records}
 
-    if not top_received:
-        raise ValueError("falta el resultado Q4 (incluso si el top es vacio)")
-    return {1: q1, 2: q2, 3: q3, 4: q4, 5: q5}, q2_sizes, unknown
+    q3_records = load_json(os.path.join(path, "q3.json"))
+    q3 = {record["word"] for record in q3_records}
+    if len(q3) != len(q3_records):
+        raise ValueError("Q3: hay palabras duplicadas")
+
+    q4_records = load_json(os.path.join(path, "q4.json"))
+    q4 = {record["word"]: record["amount"] for record in q4_records}
+    if len(q4) != len(q4_records):
+        raise ValueError("Q4: top con palabras repetidas")
+
+    q5_records = load_json(os.path.join(path, "q5.json"))
+    q5 = {record["url"]: record["amount"] for record in q5_records}
+    if len(q5) != len(q5_records):
+        raise ValueError("Q5: hay URLs duplicadas")
+
+    return {1: q1, 2: q2, 3: q3, 4: q4, 5: q5}, q2_sizes
 
 
 # --------------------------------------------------------------------------- #
@@ -365,7 +348,7 @@ def show(label, values, limit=5):
 
 
 def verify_file(path, expected):
-    received, q2_sizes, unknown = received_results(path)
+    received, q2_sizes = received_results(path)
     print(f"\n== {path}")
 
     failures = 0
@@ -424,16 +407,12 @@ def verify_file(path, expected):
         show("sobran", extra)
         show("distintos", different)
 
-    if unknown:
-        failures += 1
-        print(f"  queries desconocidas en el archivo: {dict(unknown)}")
-
     return failures
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("outputs", nargs="*", help="archivos .bin del cliente")
+    parser.add_argument("outputs", nargs="*", help="carpetas de salida de los clientes")
     parser.add_argument("--compose", help="Compose del que leer los clientes y sus salidas")
     parser.add_argument("--wait", action="store_true", help="esperar a los clientes de --compose")
     source = parser.add_mutually_exclusive_group()
@@ -449,7 +428,7 @@ def main():
     if args.wait and not args.compose:
         parser.error("--wait requiere --compose")
     if args.compose and args.outputs:
-        parser.error("usa --compose o archivos de salida explicitos, no ambos")
+        parser.error("usa --compose o carpetas de salida explicitas, no ambos")
 
     try:
         if args.referencia:
@@ -480,12 +459,12 @@ def main():
 
     try:
         outputs = (client_outputs(resolve(args.compose), args.wait) if args.compose
-                   else args.outputs or sorted(glob.glob(resolve("output/*.bin"))))
+                   else args.outputs or sorted(glob.glob(resolve("output") + "/cliente_*")))
     except (OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError) as error:
         print(f"error al obtener salidas de clientes: {error}", file=sys.stderr)
         return 2
     if not outputs:
-        print("\nno hay archivos de salida para comparar")
+        print("\nno hay carpetas de salida para comparar")
         return 2
 
     failures = 0
@@ -497,7 +476,7 @@ def main():
             continue
         try:
             failures += verify_file(path, expected)
-        except (OSError, ValueError, struct.error) as error:
+        except (OSError, ValueError, KeyError, TypeError, struct.error) as error:
             print(f"\n== {path}\n  error: {error}")
             failures += 1
 
