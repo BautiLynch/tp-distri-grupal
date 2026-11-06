@@ -43,7 +43,13 @@ class ImageGetter:
             try:
                 self._get_image(client_id, name, url, image_url)
             except Exception as error:
-                if error.code == 403:
+                status_code = getattr(error, "code", None)
+                logging.debug(
+                    "Could not download image: image_url=%s error_code=%s message=%s",
+                    image_url, status_code if status_code is not None else "N/A",
+                    getattr(error, "reason", error),
+                )
+                if status_code == 403:
                     nack()
                     return
                 else:
@@ -75,7 +81,7 @@ class ImageGetter:
 
 def main():
     logging.basicConfig(
-        level=logging.INFO,
+        level=os.environ.get("LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s.%(msecs)03d | %(levelname)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )

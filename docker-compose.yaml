@@ -156,6 +156,7 @@ services:
       GATEWAY_HOST: gateway
       GATEWAY_PORT: "5678"
       INPUT_PATH: /datasets/1.jsonl
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       OUTPUT_DIR: /output/cliente_0
       PYTHONUNBUFFERED: "1"
       Q2_IMAGE_LIMIT: "10"
@@ -187,6 +188,7 @@ services:
       GATEWAY_HOST: gateway
       GATEWAY_PORT: "5678"
       INPUT_PATH: /datasets/2.jsonl
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       OUTPUT_DIR: /output/cliente_1
       PYTHONUNBUFFERED: "1"
       Q2_IMAGE_LIMIT: "10"
@@ -218,6 +220,7 @@ services:
       GATEWAY_HOST: gateway
       GATEWAY_PORT: "5678"
       INPUT_PATH: /datasets/3.jsonl
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       OUTPUT_DIR: /output/cliente_2
       PYTHONUNBUFFERED: "1"
       Q2_IMAGE_LIMIT: "10"
@@ -623,6 +626,7 @@ services:
       ID: "0"
       IMAGE_TIMEOUT: "10"
       INPUT_EXCHANGE: image_getter
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: results
       PYTHONUNBUFFERED: "1"

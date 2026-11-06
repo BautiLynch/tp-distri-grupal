@@ -1,14 +1,11 @@
-"""Verifica los archivos de salida del cliente contra los resultados esperados.
+"""Verifica los archivos de salida del cliente contra una referencia serial.
 
-Con --referencia se usa el JSON guardado por scripts/serial.py, sin abrir el
-dataset ni recalcular las consultas. Sin esa opcion se calculan desde el dataset
-con las mismas reglas de normalizacion, stopwords y conteo.
+Requiere --referencia con el JSON generado por tools/serial.py.
+No abre el dataset ni recalcula las consultas.
 
 Uso:
-    python3 tools/verificar.py --referencia output/referencia.json output/cliente_0
-    py -3 tools/verificar.py
-    py -3 tools/verificar.py --dataset datasets/wikipedia-1000-v2.jsonl output/cliente_0
-    py -3 tools/verificar.py --dataset datasets/wikipedia-1000-v2.jsonl output/cliente_*
+    python3 tools/verificar.py --referencia test/referencia.json output/cliente_0
+    python3 tools/verificar.py --referencia test/referencia.json --compose docker-compose.yaml --wait
 
 Con --compose se toman las salidas de los clientes del Compose vigente.
 --wait espera a que esos clientes terminen y comprueba sus codigos de salida.
@@ -19,15 +16,12 @@ Sale con codigo 0 si todo coincide y 1 si hay diferencias.
 import argparse
 import collections
 import glob
-import heapq
 import json
 import os
 from pathlib import Path, PurePosixPath
-import re
 import struct
 import subprocess
 import sys
-from datetime import datetime
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -36,7 +30,7 @@ UINT32_SIZE = 4
 
 
 # --------------------------------------------------------------------------- #
-# Lectura del dataset
+# Referencia y archivos de salida
 # --------------------------------------------------------------------------- #
 def resolve(path):
     if os.path.isabs(path) or os.path.exists(path):
@@ -86,9 +80,7 @@ def load_reference(path):
     with open(path, encoding="utf-8") as handle:
         saved = json.load(handle)
     if not isinstance(saved, dict) or saved.get("format") != "wikipedia-serial-v2":
-        raise ValueError("referencia incompatible: regenerala con scripts/serial.py; "
-                         "ahora se separa con re.findall y Q5 excluye "
-                         "los abstracts sin palabras validas del promedio")
+        raise ValueError("referencia incompatible: regenerala con tools/serial.py")
     return {
         1: collections.Counter({(url, date): count for url, date, count in saved["q1"]}),
         2: collections.Counter({(name, url): count for name, url, count in saved["q2"]}),
@@ -101,123 +93,6 @@ def load_reference(path):
         "post_urls": saved["post_urls"],
         "dataset": saved["dataset"],
         "config": saved["config"],
-    }
-
-
-def load_articles(path):
-    with open(path, encoding="utf-8") as handle:
-        for line in handle:
-            if line.strip():
-                yield json.loads(line)
-
-
-def load_stopwords(directory):
-    stopwords = {}
-    for name in ("english", "french"):
-        path = os.path.join(directory, f"{name}.txt")
-        with open(path, encoding="utf-8") as handle:
-            stopwords[name[:2]] = {line.strip() for line in handle}
-    return stopwords
-
-
-def text_of(article, field, default=""):
-    value = article.get(field)
-    return value if isinstance(value, str) else default
-
-
-def language_of(article):
-    language = article.get("in_language")
-    if not isinstance(language, dict):
-        return None
-    return language.get("identifier")
-
-
-def word_occurrences(article, ignored):
-    """Ocurrencias normalizadas; Q3 y Q4 deduplican despues por articulo."""
-    abstract = text_of(article, "abstract")
-    return [word for word in re.findall(r"\w+", abstract.lower())
-            if word not in ignored and not word.isdecimal()]
-
-
-def year_of(article):
-    return datetime.fromisoformat(article["date_modified"].replace("Z", "+00:00")).year
-
-
-def section_names(article):
-    names = []
-
-    def walk(sections):
-        for section in sections or []:
-            if not isinstance(section, dict) or section.get("type") != "section":
-                continue
-            if section.get("name") is not None:
-                names.append(section["name"])
-            walk(section.get("has_parts"))
-
-    sections = article.get("sections")
-    if isinstance(sections, list):
-        walk(sections)
-    return names
-
-
-def expected_results(articles, stopwords, year, language, sections, top_size):
-    wanted_sections = {section.lower() for section in sections}
-    ignored = set().union(*stopwords.values())
-
-    q1 = collections.Counter()
-    q2 = collections.Counter()
-    q3_en, q3_fr = set(), set()
-    word_articles = collections.Counter()
-    pre_words = collections.Counter()   
-    post_words = collections.Counter()  
-    article_count = 0
-
-    for article in articles:
-        article_count += 1
-        article_language = language_of(article)
-        article_year = year_of(article)
-        url = article["url"]
-        occurrences = word_occurrences(article, ignored)
-        words = set(occurrences)
-
-        if article_year <= year:
-            if article_language == language:
-                q1[(url, article["date_modified"])] += 1
-            names = {name.lower() for name in section_names(article)}
-            if wanted_sections.intersection(names):
-                q2[(text_of(article, "name"), url)] += 1
-            if occurrences:
-                pre_words[url] += len(occurrences)
-        elif occurrences:
-            post_words[url] += len(occurrences)
-
-        for word in words:
-            word_articles[word] += 1
-
-        if article_language == "en":
-            q3_en |= words
-        elif article_language == "fr":
-            q3_fr |= words
-
-    threshold = 0.0
-    if pre_words:
-        threshold = sum(pre_words.values()) / len(pre_words)
-
-    q5 = {url: count for url, count in post_words.items() if count > threshold}
-    q4 = dict(heapq.nlargest(top_size, word_articles.items(), key=lambda item: item[1]))
-
-    return {
-        1: q1,
-        2: q2,
-        3: q3_en & q3_fr,
-        4: q4,
-        5: q5,
-        "q4_candidates": {word: count for word, count in word_articles.items()
-                          if q4 and count >= min(q4.values())},
-        "threshold": threshold,
-        "pre_urls": len(pre_words),
-        "post_urls": len(post_words),
-        "articles": article_count,
     }
 
 
@@ -415,14 +290,7 @@ def main():
     parser.add_argument("outputs", nargs="*", help="carpetas de salida de los clientes")
     parser.add_argument("--compose", help="Compose del que leer los clientes y sus salidas")
     parser.add_argument("--wait", action="store_true", help="esperar a los clientes de --compose")
-    source = parser.add_mutually_exclusive_group()
-    source.add_argument("--dataset", help="JSONL para calcular los resultados esperados")
-    source.add_argument("--referencia", help="JSON de scripts/serial.py; no recalcula el dataset")
-    parser.add_argument("--stopwords", default="src/splitter/stopwords")
-    parser.add_argument("--year", type=int, default=2020, help="YEAR del filtro de anio")
-    parser.add_argument("--language", default="en", help="LANGUAGE del filter_0")
-    parser.add_argument("--sections", default="Biography,Biographie")
-    parser.add_argument("--top", type=int, default=20, help="TOP_SIZE de la Q4")
+    parser.add_argument("--referencia", required=True, help="JSON generado por tools/serial.py")
     parser.add_argument("--esperado", action="store_true", help="solo mostrar los valores esperados")
     args = parser.parse_args()
     if args.wait and not args.compose:
@@ -431,22 +299,8 @@ def main():
         parser.error("usa --compose o carpetas de salida explicitas, no ambos")
 
     try:
-        if args.referencia:
-            reference_path = resolve(args.referencia)
-            expected = load_reference(reference_path)
-            year = expected["config"]["year"]
-        else:
-            dataset_path = resolve(args.dataset or "datasets/wikipedia-1000.jsonl")
-            articles = load_articles(dataset_path)
-            stopwords = load_stopwords(resolve(args.stopwords))
-            expected = expected_results(
-                articles, stopwords, year=args.year, language=args.language,
-                sections=[section for section in args.sections.split(",") if section],
-                top_size=args.top,
-            )
-            print(f"dataset: {dataset_path}")
-            print(f"articulos: {expected['articles']}")
-            year = args.year
+        reference_path = resolve(args.referencia)
+        expected = load_reference(reference_path)
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
