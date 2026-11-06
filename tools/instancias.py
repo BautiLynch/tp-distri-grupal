@@ -81,9 +81,9 @@ def scale_config(config, target, amount):
             if group != "client":
                 env["ID"] = str(index)
             else:
-                path = Path(env["OUTPUT_PATH"])
-                stem = re.sub(r"_\d+$", "", path.stem)
-                env["OUTPUT_PATH"] = str(path.with_name(f"{stem}_{index}{path.suffix}")).replace("\\", "/")
+                path = Path(env["OUTPUT_DIR"])
+                stem = re.sub(r"_\d+$", "", path.name)
+                env["OUTPUT_DIR"] = str(path.with_name(f"{stem}_{index}")).replace("\\", "/")
             if index not in replicas[group]:
                 for volume in clone.get("volumes", []):
                     if volume["type"] == "volume":

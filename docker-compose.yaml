@@ -157,8 +157,9 @@ services:
       GATEWAY_PORT: "5678"
       INPUT_PATH: /datasets/1.jsonl
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      OUTPUT_PATH: /output/output_0.bin
+      OUTPUT_DIR: /output/cliente_0
       PYTHONUNBUFFERED: "1"
+      Q2_IMAGE_LIMIT: "10"
     volumes:
       - bind:
           create_host_path: true
@@ -188,8 +189,9 @@ services:
       GATEWAY_PORT: "5678"
       INPUT_PATH: /datasets/2.jsonl
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      OUTPUT_PATH: /output/output_1.bin
+      OUTPUT_DIR: /output/cliente_1
       PYTHONUNBUFFERED: "1"
+      Q2_IMAGE_LIMIT: "10"
     volumes:
       - bind:
           create_host_path: true
@@ -219,8 +221,9 @@ services:
       GATEWAY_PORT: "5678"
       INPUT_PATH: /datasets/3.jsonl
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      OUTPUT_PATH: /output/output_2.bin
+      OUTPUT_DIR: /output/cliente_2
       PYTHONUNBUFFERED: "1"
+      Q2_IMAGE_LIMIT: "10"
     volumes:
       - bind:
           create_host_path: true
