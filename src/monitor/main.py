@@ -1,7 +1,7 @@
 import os
 import logging
 import threading
-from time import time
+import time
 
 from common import middleware
 from common.message_protocol.internal import deserialize_msg
@@ -9,6 +9,7 @@ from common.message_protocol.internal import deserialize_msg
 MOM_HOST = os.environ["MOM_HOST"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
+HEARTBEAT_ALLOWED_MISSES = int(os.environ.get("HEARTBEAT_ALLOWED_MISSES", 3))
 
 
 class Monitor:
@@ -50,8 +51,6 @@ class Monitor:
                     self.condition.wait(timeout=remaining)
                     continue
 
-                # TODO: tal vez deberia esperar N heartbeats en vez de uno solo
-
                 del self.heartbeats[container_id]
 
             self._heartbeat_exceeded(container_id)
@@ -67,7 +66,7 @@ class Monitor:
 
             with self.condition:
                 self.heartbeats[container_id] = (
-                    time.monotonic() + HEARTBEAT_INTERVAL
+                    time.monotonic() + HEARTBEAT_INTERVAL * HEARTBEAT_ALLOWED_MISSES
                 )
                 self.condition.notify()
 
