@@ -17,7 +17,7 @@ client = docker.from_env()
 
 class Monitor:
     def __init__(self):
-        # Hilo para heartbeat de monitores y eleccion de lider
+        # TODO: Hilo para heartbeat de monitores y eleccion de lider
     
         self.heartbeats = {}
         self.stopping = False
@@ -76,12 +76,14 @@ class Monitor:
 
     def process_heartbeat(self, message, ack, nack):
         try:
-            message_type, _, container_id = deserialize_msg(message)
+            message_type, _, fields = deserialize_msg(message)
 
-            if message_type is not MsgType.HEARTBEAT:
+            if message_type != MsgType.HEARTBEAT:
                 logging.warning(f"Received non-heartbeat message: {message_type}")
                 nack()
                 return
+            
+            container_id, = fields
 
             logging.info(f"Received heartbeat from container {container_id}")
 

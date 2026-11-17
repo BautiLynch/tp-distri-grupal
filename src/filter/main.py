@@ -27,9 +27,6 @@ class FilterYearPlus:
     def __init__(self):
 
         self.container_id = socket.gethostname()
-        self.heartbeat_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, HEARTBEAT_EXCHANGE, ["heartbeat"], consume=False
-        )
         self.heartbeat = threading.Thread(
             target=self._send_heartbeat,
             name="heartbeat",
@@ -49,9 +46,14 @@ class FilterYearPlus:
         self.sections = {section.lower() for section in SECTIONS}
 
     def _send_heartbeat(self):
+        self.heartbeat_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, HEARTBEAT_EXCHANGE, ["heartbeat"], consume=False
+        )
+
         while True:
+            # TODO: sigterm
             self.heartbeat_exchange.send_to(
-                serialize_msg(MsgType.HEARTBEAT, ID, self.container_id),
+                serialize_msg(MsgType.HEARTBEAT, int(ID), self.container_id),
                 routing_key="heartbeat",
             )
             sleep(HEARTBEAT_INTERVAL)
