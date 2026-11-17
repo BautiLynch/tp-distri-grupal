@@ -114,25 +114,31 @@ def read_records(path):
             yield kind, query, payload
 
 
-def read_text(payload, offset):
-    size, start = read_uint32(payload, offset)
+# Campos del payload interno: tipo (1 byte) + largo (uint32) + contenido.
+FIELD_TEXT = 2
+FIELD_BYTES = 3
+
+
+def read_field(payload, offset, expected_type):
+    if offset + 5 > len(payload):
+        raise ValueError("campo truncado")
+    field_type = payload[offset]
+    size = struct.unpack(">I", payload[offset + 1:offset + 5])[0]
+    start = offset + 5
+    if field_type != expected_type:
+        raise ValueError(f"tipo de campo inesperado: {field_type}")
     if start + size > len(payload):
-        raise ValueError("texto truncado")
-    return payload[start:start + size].decode("utf-8"), start + size
-
-
-def read_uint32(payload, offset):
-    return struct.unpack(">I", payload[offset:offset + 4])[0], offset + 4
+        raise ValueError("campo truncado")
+    return payload[start:start + size], start + size
 
 
 def parse_q2_record(payload):
-    name, offset = read_text(payload, 0)
-    url, offset = read_text(payload, offset)
-    size, offset = read_uint32(payload, offset)
-    offset += size
+    name, offset = read_field(payload, 0, FIELD_TEXT)
+    url, offset = read_field(payload, offset, FIELD_TEXT)
+    image, offset = read_field(payload, offset, FIELD_BYTES)
     if offset != len(payload):
         raise ValueError("Q2: payload truncado o con bytes sobrantes")
-    return name, url, size
+    return name.decode("utf-8"), url.decode("utf-8"), len(image)
 
 
 def load_json(path):
