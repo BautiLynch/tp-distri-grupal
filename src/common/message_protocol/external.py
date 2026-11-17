@@ -58,9 +58,6 @@ def send_all(connection, data):
         view = view[sent:]
 
 
-# --------------------------------------------------------------------------- #
-# Validaciones por tipo de mensaje
-# --------------------------------------------------------------------------- #
 def _expect_fields(fields, count, name):
     if len(fields) != count:
         raise ValueError(f"{name} expects {count} fields, got {len(fields)}")
@@ -116,10 +113,6 @@ def _validate(message_type, fields):
         raise ValueError(f"Unknown message type: {message_type}")
     VALIDATORS[message_type](*fields)
 
-
-# --------------------------------------------------------------------------- #
-# API
-# --------------------------------------------------------------------------- #
 def serialize_msg(message_type, *fields):
     _validate(message_type, fields)
     payload = encode_fields(*fields)
