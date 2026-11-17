@@ -248,6 +248,7 @@ services:
       ID: "0"
       IMAGE_GETTER_AMOUNT: "1"
       IMAGE_GETTER_PREFIX: image_getter
+      HEARTBEAT_EXCHANGE: heartbeat
       INPUT_EXCHANGE: filter
       LANGUAGE: en
       MOM_HOST: rabbitmq
@@ -268,6 +269,7 @@ services:
       ID: "1"
       IMAGE_GETTER_AMOUNT: "1"
       IMAGE_GETTER_PREFIX: image_getter
+      HEARTBEAT_EXCHANGE: heartbeat
       INPUT_EXCHANGE: filter
       LANGUAGE: en
       MOM_HOST: rabbitmq
@@ -288,6 +290,7 @@ services:
       ID: "2"
       IMAGE_GETTER_AMOUNT: "1"
       IMAGE_GETTER_PREFIX: image_getter
+      HEARTBEAT_EXCHANGE: heartbeat
       INPUT_EXCHANGE: filter
       LANGUAGE: en
       MOM_HOST: rabbitmq
@@ -645,6 +648,25 @@ services:
       OUTPUT_EXCHANGE: results
       PYTHONUNBUFFERED: "1"
       TOP_SIZE: "20"
+  monitor:
+    build:
+      context: ./src
+      dockerfile: monitor/Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+        required: true
+    environment:
+      HEARTBEAT_ALLOWED_MISSES: "3"
+      ID: "0"
+      HEARTBEAT_INTERVAL: "5"
+      INPUT_EXCHANGE: heartbeat
+      MOM_HOST: rabbitmq
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        type: bind
   rabbitmq:
     build:
       context: ./src/rabbitmq

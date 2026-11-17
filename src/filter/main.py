@@ -1,6 +1,5 @@
 import os
 import logging
-import socket
 
 from datetime import datetime
 import threading
@@ -26,7 +25,8 @@ YEAR = int(os.environ["YEAR"])
 class FilterYearPlus:
     def __init__(self):
 
-        self.container_id = socket.gethostname()
+        # Nombre del servicio en el compose: el monitor lo usa para identificar y reiniciar al worker.
+        self.worker_name = f"filter_{ID}"
         self.heartbeat = threading.Thread(
             target=self._send_heartbeat,
             name="heartbeat",
@@ -34,7 +34,7 @@ class FilterYearPlus:
 
         self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
+            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True, queue_name=f"filter_{ID}"
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ( 
             MOM_HOST, OUTPUT_EXCHANGE_1, [], consume=False
@@ -53,7 +53,7 @@ class FilterYearPlus:
         while True:
             # TODO: sigterm
             self.heartbeat_exchange.send_to(
-                serialize_msg(MsgType.HEARTBEAT, int(ID), self.container_id),
+                serialize_msg(MsgType.HEARTBEAT, int(ID), self.worker_name),
                 routing_key="heartbeat",
             )
             sleep(HEARTBEAT_INTERVAL)
