@@ -25,8 +25,14 @@ import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Formato de resto.bin: ver src/common/message_protocol/{external,fields}.py
 RESULT = 6
 UINT32_SIZE = 4
+MESSAGE_HEADER_SIZE = 2 * UINT32_SIZE
+FIELD_HEADER_SIZE = 1 + UINT32_SIZE
+TYPE_INT = 1
+TYPE_TEXT = 2
+TYPE_BYTES = 3
 
 
 # --------------------------------------------------------------------------- #
@@ -110,29 +116,46 @@ def read_uint32(handle):
     return struct.unpack(">I", read_exact(handle, 4))[0]
 
 
-def read_text(handle):
-    return read_exact(handle, read_uint32(handle)).decode("utf-8")
+def read_field_header(handle, expected_type):
+    field_type, size = struct.unpack(">BI", read_exact(handle, FIELD_HEADER_SIZE))
+    if field_type != expected_type:
+        raise ValueError(f"{handle.name}: campo de tipo {field_type}, se esperaba {expected_type}")
+    return size
+
+
+def read_int_field(handle):
+    if read_field_header(handle, TYPE_INT) != UINT32_SIZE:
+        raise ValueError(f"{handle.name}: entero con largo invalido")
+    return read_uint32(handle)
+
+
+def read_text_field(handle):
+    return read_exact(handle, read_field_header(handle, TYPE_TEXT)).decode("utf-8")
 
 
 def read_q2_records(path):
-    """resto.bin guarda solo resultados de Q2, uno atras del otro, sin largo total:
-    tipo, query, name, url y la imagen (largo + bytes)."""
+    """resto.bin guarda solo mensajes RESULT de Q2 del protocolo externo, uno
+    atras del otro: [tipo][largo del payload] y el payload TLV con
+    query_id (int), name (text), url (text) e imagen (bytes)."""
     file_size = os.path.getsize(path)
     with open(path, "rb") as handle:
         while True:
-            header = handle.read(4)
+            header = handle.read(MESSAGE_HEADER_SIZE)
             if not header:
                 return
-            if len(header) != 4:
+            if len(header) != MESSAGE_HEADER_SIZE:
                 raise ValueError(f"{path}: registro truncado en el byte {handle.tell() - len(header)}")
-            kind = struct.unpack(">I", header)[0]
-            query = read_uint32(handle)
-            name = read_text(handle)
-            url = read_text(handle)
-            image_size = read_uint32(handle)
-            if handle.tell() + image_size > file_size:
-                raise ValueError(f"{path}: imagen truncada en el byte {handle.tell()}")
-            handle.seek(image_size, os.SEEK_CUR)
+            kind, payload_size = struct.unpack(">II", header)
+            payload_end = handle.tell() + payload_size
+            if payload_end > file_size:
+                raise ValueError(f"{path}: registro truncado en el byte {handle.tell()}")
+            query = read_int_field(handle)
+            name = read_text_field(handle)
+            url = read_text_field(handle)
+            image_size = read_field_header(handle, TYPE_BYTES)
+            if handle.tell() + image_size != payload_end:
+                raise ValueError(f"{path}: el largo del registro no coincide en el byte {handle.tell()}")
+            handle.seek(payload_end)
             yield kind, query, name, url, image_size
 
 

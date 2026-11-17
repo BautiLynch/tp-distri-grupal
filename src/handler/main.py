@@ -50,11 +50,12 @@ class ClientHandler:
         self.stopping = False
 
     def run(self):
-        message_type, client_id = recv_msg(
+        message_type, fields = recv_msg(
             self.client_socket
         )
         if message_type != ExternalMsgType.CLIENT_ID:
             raise ValueError("Expected a client ID to register the connection")
+        client_id, = fields
         self.client_id = client_id
         if self.stopping:
             return
