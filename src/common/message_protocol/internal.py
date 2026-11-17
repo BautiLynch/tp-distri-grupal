@@ -37,7 +37,7 @@ PAYLOAD_SIZE_OFFSET = CLIENT_ID_OFFSET + UINT32_SIZE
 HEADER_SIZE = PAYLOAD_SIZE_OFFSET + UINT32_SIZE
 
 
-def _serialize_payload(message_type, *fields):
+def serialize_payload(message_type, *fields):
     # Valida que el tipo de mensaje esté definido.
     MsgType(message_type)
 
@@ -74,7 +74,7 @@ def _serialize_payload(message_type, *fields):
     return b"".join(encode(field) for field in fields)
 
 
-def _deserialize_payload(message_type, payload):
+def deserialize_payload(message_type, payload):
     MsgType(message_type)
 
     def decode_fields(data):
@@ -129,7 +129,7 @@ def _deserialize_payload(message_type, payload):
 
 
 def serialize_msg(message_type, client_id, *fields):
-    payload = _serialize_payload(message_type, *fields)
+    payload = serialize_payload(message_type, *fields)
     return (
         int(message_type).to_bytes(UINT32_SIZE, "big")
         + client_id.to_bytes(UINT32_SIZE, "big")
@@ -159,5 +159,5 @@ def deserialize_msg(message):
     
     payload = message[HEADER_SIZE:]
 
-    fields = _deserialize_payload(message_type, payload)
+    fields = deserialize_payload(message_type, payload)
     return message_type, client_id, fields
