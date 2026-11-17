@@ -3,7 +3,7 @@ import json
 import os
 
 from common.message_protocol import external
-from common.message_protocol.internal import MsgType, deserialize_payload
+from common.message_protocol.external import QueryId
 
 Q2_DIRECTORY = "q2"
 Q2_REMAINING_FILE = "resto.bin"
@@ -62,11 +62,11 @@ class ResultWriter:
         self.remaining_images = open(os.path.join(self.q2_dir, Q2_REMAINING_FILE), "wb")
         try:
             self.writers = {
-                MsgType.Q1_RESULT: JsonArrayWriter(os.path.join(self.output_dir, "q1.json")),
-                MsgType.Q2_RESULT: JsonArrayWriter(os.path.join(self.q2_dir, "q2.json")),
-                MsgType.Q3_RESULT: JsonArrayWriter(os.path.join(self.output_dir, "q3.json")),
-                MsgType.Q4_RESULT: JsonArrayWriter(os.path.join(self.output_dir, "q4.json")),
-                MsgType.Q5_RESULT: JsonArrayWriter(os.path.join(self.output_dir, "q5.json")),
+                QueryId.Q1: JsonArrayWriter(os.path.join(self.output_dir, "q1.json")),
+                QueryId.Q2: JsonArrayWriter(os.path.join(self.q2_dir, "q2.json")),
+                QueryId.Q3: JsonArrayWriter(os.path.join(self.output_dir, "q3.json")),
+                QueryId.Q4: JsonArrayWriter(os.path.join(self.output_dir, "q4.json")),
+                QueryId.Q5: JsonArrayWriter(os.path.join(self.output_dir, "q5.json")),
             }
         except OSError:
             self.__exit__(None, None, None)
@@ -78,27 +78,26 @@ class ResultWriter:
             writer.close()
         self.remaining_images.close()
 
-    def write(self, query_id, payload):
+    def write(self, query_id, fields):
         if query_id not in self.writers:
             raise ValueError(f"Unexpected query result {query_id}")
-        fields = deserialize_payload(query_id, payload)
         writer = self.writers[query_id]
-        if query_id == MsgType.Q1_RESULT:
+        if query_id == QueryId.Q1:
             url, date_modified = fields
             writer.write({"url": url, "date_modified": date_modified})
-        elif query_id == MsgType.Q2_RESULT:
+        elif query_id == QueryId.Q2:
             name, url, image = fields
-            location = self._store_image(query_id, payload, image)
+            location = self._store_image(query_id, fields, image)
             writer.write({
                 "name": name,
                 "url": url,
                 "image": location,
                 "image_size": len(image),
             })
-        elif query_id == MsgType.Q3_RESULT:
+        elif query_id == QueryId.Q3:
             word, = fields
             writer.write({"word": word})
-        elif query_id == MsgType.Q4_RESULT:
+        elif query_id == QueryId.Q4:
             top_list, = fields
             for word, amount in top_list:
                 writer.write({"word": word, "amount": amount})
@@ -106,12 +105,12 @@ class ResultWriter:
             url, amount = fields
             writer.write({"url": url, "amount": amount})
 
-    def _store_image(self, query_id, payload, image):
+    def _store_image(self, query_id, fields, image):
         if not image:
             return None
         if self.saved_images >= self.image_limit:
             self.remaining_images.write(
-                external.serialize_msg(external.MsgType.RESULT, query_id, payload)
+                external.serialize_msg(external.MsgType.RESULT, query_id, *fields)
             )
             return Q2_REMAINING_FILE
         self.saved_images += 1

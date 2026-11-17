@@ -9,6 +9,14 @@ class MsgType(IntEnum):
     HANDLER_ADDRESS = auto()
     RESULT = auto()
 
+
+class QueryId(IntEnum):
+    Q1 = 1
+    Q2 = 2
+    Q3 = 3
+    Q4 = 4
+    Q5 = 5
+
 UINT32_SIZE = 4
 
 def recv_all(connection, size):
@@ -91,17 +99,60 @@ def _serialize_handler_address(host, port):
     _validate_address(host, port)
     return _serialize_text(host) + _serialize_uint32(port)
 
+# Cada resultado se describe con los tipos de sus campos.
+RESULT_FORMATS = {
+    QueryId.Q1: ("text", "text"),
+    QueryId.Q2: ("text", "text", "bytes"),
+    QueryId.Q3: ("text",),
+    QueryId.Q4: ("top",),
+    QueryId.Q5: ("text", "uint32"),
+}
+
+
+def _serialize_top(top_list):
+    payload = _serialize_uint32(len(top_list))
+    for word, amount in top_list:
+        payload += _serialize_text(word) + _serialize_uint32(amount)
+    return payload
+
+
+def _recv_top(connection):
+    count = _recv_uint32(connection)
+    return [(_recv_text(connection), _recv_uint32(connection)) for _ in range(count)]
+
+
+FIELD_SERIALIZERS = {
+    "text": _serialize_text,
+    "bytes": _serialize_bytes,
+    "uint32": _serialize_uint32,
+    "top": _serialize_top,
+}
+
+FIELD_READERS = {
+    "text": _recv_text,
+    "bytes": _recv_bytes,
+    "uint32": _recv_uint32,
+    "top": _recv_top,
+}
+
+
 def _recv_result(connection):
     query_id = _recv_uint32(connection)
-    if query_id == 0:
-        raise ValueError("Query ID must be positive")
-    return query_id, _recv_bytes(connection)
+    if query_id not in RESULT_FORMATS:
+        raise ValueError(f"Unknown query ID: {query_id}")
+    fields = tuple(FIELD_READERS[field_type](connection) for field_type in RESULT_FORMATS[query_id])
+    return query_id, fields
 
 
-def _serialize_result(query_id, payload):
-    if type(query_id) is not int or query_id <= 0:
-        raise ValueError("Query ID must be positive")
-    return _serialize_uint32(query_id) + _serialize_bytes(payload)
+def _serialize_result(query_id, *fields):
+    if query_id not in RESULT_FORMATS:
+        raise ValueError(f"Unknown query ID: {query_id}")
+    formats = RESULT_FORMATS[query_id]
+    if len(fields) != len(formats):
+        raise ValueError(f"Query {query_id} expects {len(formats)} fields, got {len(fields)}")
+    return _serialize_uint32(query_id) + b"".join(
+        FIELD_SERIALIZERS[field_type](value) for field_type, value in zip(formats, fields)
+    )
 
 
 def _recv_empty(connection):

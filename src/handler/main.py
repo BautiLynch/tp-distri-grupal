@@ -6,13 +6,21 @@ import threading
 import multiprocessing
 
 from common import middleware
-from common.message_protocol.internal import deserialize_msg, serialize_payload, MsgType as InternalMsgType
-from common.message_protocol.external import recv_msg, send_msg, MsgType as ExternalMsgType
+from common.message_protocol.internal import deserialize_msg, MsgType as InternalMsgType
+from common.message_protocol.external import recv_msg, send_msg, MsgType as ExternalMsgType, QueryId
 
 SERVER_HOST = os.environ["SERVER_HOST"]
 SERVER_PORT = int(os.environ["SERVER_PORT"])
 MOM_HOST = os.environ["MOM_HOST"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
+
+QUERY_IDS = {
+    InternalMsgType.Q1_RESULT: QueryId.Q1,
+    InternalMsgType.Q2_RESULT: QueryId.Q2,
+    InternalMsgType.Q3_RESULT: QueryId.Q3,
+    InternalMsgType.Q4_RESULT: QueryId.Q4,
+    InternalMsgType.Q5_RESULT: QueryId.Q5,
+}
 
 QUERY_REPLICAS = {
     "q1": int(os.environ["QUERY_1_REPLICAS"]),
@@ -85,10 +93,9 @@ class ClientHandler:
                         ExternalMsgType.END_OF_RECORDS,
                     )
             else:
-                payload = serialize_payload(message_type, *fields)
                 send_msg(
-                    self.client_socket, ExternalMsgType.RESULT, message_type,
-                    payload,
+                    self.client_socket, ExternalMsgType.RESULT,
+                    QUERY_IDS[message_type], *fields,
                 )
         except Exception:
             nack()

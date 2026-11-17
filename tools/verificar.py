@@ -99,46 +99,41 @@ def load_reference(path):
 # --------------------------------------------------------------------------- #
 # Lectura de las carpetas de salida
 # --------------------------------------------------------------------------- #
-def read_records(path):
+def read_exact(handle, size):
+    data = handle.read(size)
+    if len(data) != size:
+        raise ValueError(f"{handle.name}: registro truncado en el byte {handle.tell() - len(data)}")
+    return data
+
+
+def read_uint32(handle):
+    return struct.unpack(">I", read_exact(handle, 4))[0]
+
+
+def read_text(handle):
+    return read_exact(handle, read_uint32(handle)).decode("utf-8")
+
+
+def read_q2_records(path):
+    """resto.bin guarda solo resultados de Q2, uno atras del otro, sin largo total:
+    tipo, query, name, url y la imagen (largo + bytes)."""
+    file_size = os.path.getsize(path)
     with open(path, "rb") as handle:
         while True:
-            header = handle.read(12)
+            header = handle.read(4)
             if not header:
                 return
-            if len(header) != 12:
+            if len(header) != 4:
                 raise ValueError(f"{path}: registro truncado en el byte {handle.tell() - len(header)}")
-            kind, query, size = struct.unpack(">III", header)
-            payload = handle.read(size)
-            if len(payload) != size:
-                raise ValueError(f"{path}: payload truncado en el byte {handle.tell() - len(payload)}")
-            yield kind, query, payload
-
-
-# Campos del payload interno: tipo (1 byte) + largo (uint32) + contenido.
-FIELD_TEXT = 2
-FIELD_BYTES = 3
-
-
-def read_field(payload, offset, expected_type):
-    if offset + 5 > len(payload):
-        raise ValueError("campo truncado")
-    field_type = payload[offset]
-    size = struct.unpack(">I", payload[offset + 1:offset + 5])[0]
-    start = offset + 5
-    if field_type != expected_type:
-        raise ValueError(f"tipo de campo inesperado: {field_type}")
-    if start + size > len(payload):
-        raise ValueError("campo truncado")
-    return payload[start:start + size], start + size
-
-
-def parse_q2_record(payload):
-    name, offset = read_field(payload, 0, FIELD_TEXT)
-    url, offset = read_field(payload, offset, FIELD_TEXT)
-    image, offset = read_field(payload, offset, FIELD_BYTES)
-    if offset != len(payload):
-        raise ValueError("Q2: payload truncado o con bytes sobrantes")
-    return name.decode("utf-8"), url.decode("utf-8"), len(image)
+            kind = struct.unpack(">I", header)[0]
+            query = read_uint32(handle)
+            name = read_text(handle)
+            url = read_text(handle)
+            image_size = read_uint32(handle)
+            if handle.tell() + image_size > file_size:
+                raise ValueError(f"{path}: imagen truncada en el byte {handle.tell()}")
+            handle.seek(image_size, os.SEEK_CUR)
+            yield kind, query, name, url, image_size
 
 
 def load_json(path):
@@ -160,10 +155,10 @@ def verify_q2_images(path, records):
             raise ValueError(f"Q2: tamano incorrecto en {location}")
 
     stored = collections.Counter()
-    for kind, query, payload in read_records(os.path.join(q2_dir, "resto.bin")):
+    for kind, query, name, url, image_size in read_q2_records(os.path.join(q2_dir, "resto.bin")):
         if kind != RESULT or query != 2:
             raise ValueError(f"registro inesperado en resto.bin: {kind}, {query}")
-        stored[parse_q2_record(payload)] += 1
+        stored[(name, url, image_size)] += 1
     if stored != binary:
         raise ValueError("Q2: resto.bin no coincide con q2.json")
 
