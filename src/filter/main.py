@@ -1,13 +1,18 @@
-from datetime import datetime
 import os
 import logging
+import socket
 
+from datetime import datetime
+import threading
+from time import sleep
 from common import middleware, hashing
 from common.shutdown import GracefulShutdown
 from common.message_protocol.internal import deserialize_msg, MsgType, serialize_msg
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
+HEARTBEAT_EXCHANGE = os.environ["HEARTBEAT_EXCHANGE"]
+HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 OUTPUT_EXCHANGE_1 = os.environ["OUTPUT_EXCHANGE_1"]
 OUTPUT_EXCHANGE_2 = os.environ["OUTPUT_EXCHANGE_2"]
@@ -20,6 +25,16 @@ YEAR = int(os.environ["YEAR"])
 
 class FilterYearPlus:
     def __init__(self):
+
+        self.container_id = socket.gethostname()
+        self.heartbeat_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, HEARTBEAT_EXCHANGE, ["heartbeat"], consume=False
+        )
+        self.heartbeat = threading.Thread(
+            target=self._send_heartbeat,
+            name="heartbeat",
+        )
+
         self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
@@ -32,6 +47,14 @@ class FilterYearPlus:
         )
 
         self.sections = {section.lower() for section in SECTIONS}
+
+    def _send_heartbeat(self):
+        while True:
+            self.heartbeat_exchange.send_to(
+                serialize_msg(MsgType.HEARTBEAT, ID, self.container_id),
+                routing_key="heartbeat",
+            )
+            sleep(HEARTBEAT_INTERVAL)
 
     def process_message(self, message, ack, nack):
         try:
@@ -69,6 +92,7 @@ class FilterYearPlus:
                 logging.error(f"Error closing message middleware: {e}")
 
     def start(self):
+        self.heartbeat.start()
         self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 

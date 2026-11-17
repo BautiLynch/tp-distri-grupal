@@ -1,16 +1,19 @@
+import docker
 import os
 import logging
 import threading
 import time
 
+from docker.errors import NotFound, APIError
 from common import middleware
-from common.message_protocol.internal import deserialize_msg
+from common.message_protocol.internal import deserialize_msg, MsgType
 
 MOM_HOST = os.environ["MOM_HOST"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 HEARTBEAT_ALLOWED_MISSES = int(os.environ.get("HEARTBEAT_ALLOWED_MISSES", 3))
 
+client = docker.from_env()
 
 class Monitor:
     def __init__(self):
@@ -53,15 +56,33 @@ class Monitor:
 
                 del self.heartbeats[container_id]
 
-            self._heartbeat_exceeded(container_id)
+            threading.Thread(
+                target=self._heartbeat_exceeded,
+                args=(container_id,),
+                name=f"heartbeat-exceeded-{container_id}",
+            ).start()
 
     def _heartbeat_exceeded(self, container_id):
         logging.info(f"Container {container_id} heartbeat exceeded")
-        # TODO: Aca hay que volver a levantar el container
+
+        try:
+            client.containers.get(container_id).restart()
+        except NotFound as e:
+            logging.error(f"Container {container_id} not found: {e}")
+        except APIError as e:
+            logging.error(f"Error starting container {container_id}: {e}")
+        except Exception as e:
+            logging.error(f"Unexpected error while starting container {container_id}: {e}")
 
     def process_heartbeat(self, message, ack, nack):
         try:
-            message_type, container_id, _ = deserialize_msg(message)
+            message_type, _, container_id = deserialize_msg(message)
+
+            if message_type is not MsgType.HEARTBEAT:
+                logging.warning(f"Received non-heartbeat message: {message_type}")
+                nack()
+                return
+
             logging.info(f"Received heartbeat from container {container_id}")
 
             with self.condition:

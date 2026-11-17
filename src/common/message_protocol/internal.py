@@ -17,6 +17,7 @@ class MsgType(IntEnum):
     SPLIT_WORD = auto()
     BASELINE_END = auto()
     WORD_BATCH = auto()
+    HEARTBEAT = auto()
 
 
 UINT32_SIZE = 4
