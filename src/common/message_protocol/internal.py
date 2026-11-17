@@ -1,5 +1,6 @@
 from enum import IntEnum, auto
 
+
 class MsgType(IntEnum):
     Q1_RESULT = 1
     Q2_RESULT = auto()
@@ -17,309 +18,146 @@ class MsgType(IntEnum):
     SPLIT_WORD = auto()
     BASELINE_END = auto()
     WORD_BATCH = auto()
+    HEARTBEAT = auto()
 
+
+TYPE_INT = 1
+TYPE_TEXT = 2
+TYPE_BYTES = 3
+TYPE_LIST = 4
+TYPE_TUPLE = 5
 
 UINT32_SIZE = 4
+LENGTH_SIZE = UINT32_SIZE
+FIELD_HEADER_SIZE = 1 + LENGTH_SIZE
+
 MESSAGE_TYPE_OFFSET = 0
 CLIENT_ID_OFFSET = MESSAGE_TYPE_OFFSET + UINT32_SIZE
 PAYLOAD_SIZE_OFFSET = CLIENT_ID_OFFSET + UINT32_SIZE
 HEADER_SIZE = PAYLOAD_SIZE_OFFSET + UINT32_SIZE
 
 
-def _serialize(message_type, client_id, payload):
-    return (
-        message_type.to_bytes(UINT32_SIZE, byteorder="big") +
-        client_id.to_bytes(UINT32_SIZE, byteorder="big") +
-        len(payload).to_bytes(UINT32_SIZE, byteorder="big") +
-        payload
-    )
+def _serialize_payload(message_type, *fields):
+    # Valida que el tipo de mensaje esté definido.
+    MsgType(message_type)
 
-def _deserialize(message):
-    if len(message) < HEADER_SIZE:
-        raise ValueError("Incomplete internal header")
-    
-    message_type = int.from_bytes(message[MESSAGE_TYPE_OFFSET:CLIENT_ID_OFFSET], byteorder="big")
-    client_id = int.from_bytes(message[CLIENT_ID_OFFSET:PAYLOAD_SIZE_OFFSET], byteorder="big")
-    size = int.from_bytes(message[PAYLOAD_SIZE_OFFSET:HEADER_SIZE], byteorder="big")
+    def encode(value):
+        if isinstance(value, int) and not isinstance(value, bool):
+            field_type = TYPE_INT
+            content = value.to_bytes(UINT32_SIZE, "big")
 
-    if size != len(message) - HEADER_SIZE:
-        raise ValueError("Internal payload length does not match the message")
-    
-    payload = message[HEADER_SIZE:]
-    return message_type, client_id, payload
+        elif isinstance(value, str):
+            field_type = TYPE_TEXT
+            content = value.encode("utf-8")
 
+        elif isinstance(value, bytes):
+            field_type = TYPE_BYTES
+            content = value
 
-def _serialize_texts(fields):
-    parts = []
-    for value in fields:
-        if not isinstance(value, str):
-            raise ValueError("Record fields must be strings")
-        encoded = value.encode("utf-8")
-        parts.extend((len(encoded).to_bytes(UINT32_SIZE, "big"), encoded))
-    return b"".join(parts)
+        elif isinstance(value, (list, tuple)):
+            field_type = (
+                TYPE_LIST if isinstance(value, list) else TYPE_TUPLE
+            )
+            content = b"".join(encode(item) for item in value)
 
+        else:
+            raise TypeError(
+                f"Unsupported field type: {type(value).__name__}"
+            )
 
-def _serialize_filter_article(name, url, language, date_modified, image_url, sections):
-    payload = _serialize_texts((name, url, language, date_modified, image_url))
-    payload += len(sections).to_bytes(UINT32_SIZE, "big")
-    return payload + _serialize_texts(sections)
+        return (
+            bytes((field_type,))
+            + len(content).to_bytes(LENGTH_SIZE, "big")
+            + content
+        )
 
+    return b"".join(encode(field) for field in fields)
 
-def _serialize_splitter_article(url, language, date_modified, abstract):
-    return _serialize_texts((url, language, date_modified, abstract))
 
+def _deserialize_payload(message_type, payload):
+    MsgType(message_type)
 
-def _serialize_word_language(word, language):
-    return _serialize_texts((word, language))
+    def decode_fields(data):
+        fields = []
+        offset = 0
 
+        while offset < len(data):
+            header_end = offset + FIELD_HEADER_SIZE
 
-def _serialize_word_amount(word):
-    # Splitter envia una ocurrencia; aggregation incrementa el contador.
-    return _serialize_texts((word,))
+            if header_end > len(data):
+                raise ValueError("Incomplete field header")
 
+            field_type = data[offset]
+            size = int.from_bytes(
+                data[offset + 1:header_end], "big"
+            )
+            content_end = header_end + size
 
-def _serialize_word_year_amount(url, date_modified, amount):
-    payload = _serialize_texts((url, date_modified))
-    return payload + amount.to_bytes(UINT32_SIZE, "big")
+            if content_end > len(data):
+                raise ValueError("Incomplete field content")
 
+            content = data[header_end:content_end]
 
-def _serialize_split_word(word, language, url, date_modified, amount):
-    return _serialize_texts((word, language, url, date_modified)) + amount.to_bytes(UINT32_SIZE, "big")
+            if field_type == TYPE_INT:
+                if size != UINT32_SIZE:
+                    raise ValueError("Invalid integer length")
+                value = int.from_bytes(content, "big")
 
+            elif field_type == TYPE_TEXT:
+                value = content.decode("utf-8")
 
-def _serialize_word_batch(language, words):
-    parts = [_serialize_texts((language,)), len(words).to_bytes(UINT32_SIZE, "big")]
-    for word in words:
-        parts.append(_serialize_texts((word,)))
-    return b"".join(parts)
+            elif field_type == TYPE_BYTES:
+                value = content
 
+            elif field_type == TYPE_LIST:
+                value = decode_fields(content)
 
-def _serialize_get_image(url, name, image_url):
-    return _serialize_texts((url, name, image_url))
+            elif field_type == TYPE_TUPLE:
+                value = tuple(decode_fields(content))
 
+            else:
+                raise ValueError(
+                    f"Unknown field type: {field_type}"
+                )
 
-def _serialize_query1_result(url, date_modified):
-    return _serialize_texts((url, date_modified))
+            fields.append(value)
+            offset = content_end
 
-def _serialize_query2_result(name, url, image_bytes):
-    payload = _serialize_texts((name, url))
-    payload += len(image_bytes).to_bytes(UINT32_SIZE, "big")
-    return payload + image_bytes
+        return fields
 
-def _serialize_query4_result(top_list):
-    payload = len(top_list).to_bytes(UINT32_SIZE, "big")
-    for word, amount in top_list:
-        payload += _serialize_texts((word,))
-        payload += amount.to_bytes(UINT32_SIZE, "big")
-    return payload
-
-def _serialize_query3_result(word):
-    return _serialize_texts((word,))
-
-
-def _serialize_query5_result(url, amount):
-    return _serialize_texts((url,)) + amount.to_bytes(UINT32_SIZE, "big")
-
-def _serialize_end(message_type):
-    return message_type.to_bytes(UINT32_SIZE, "big")
-
-def _serialize_empty():
-    return b""
-
-
-def _deserialize_text(payload, offset):
-    size_end = offset + UINT32_SIZE
-    if size_end > len(payload):
-        raise ValueError("Incomplete article field length")
-    size = int.from_bytes(payload[offset:size_end], byteorder="big")
-    value_end = size_end + size
-    if value_end > len(payload):
-        raise ValueError("Incomplete article field")
-    value = payload[size_end:value_end].decode("utf-8")
-    return value, value_end
-
-
-def _deserialize_texts(payload, count, offset=0):
-    fields = []
-    for _ in range(count):
-        value, offset = _deserialize_text(payload, offset)
-        fields.append(value)
-    return tuple(fields), offset
-
-
-def _deserialize_uint32(payload, offset):
-    end = offset + UINT32_SIZE
-    if end > len(payload):
-        raise ValueError("Incomplete record integer")
-    return int.from_bytes(payload[offset:end], "big"), end
-
-
-def _check_end(payload, offset):
-    if offset != len(payload):
-        raise ValueError("Unexpected bytes after record")
-
-
-def _deserialize_filter_article(payload):
-    fields, offset = _deserialize_texts(payload, 5)
-    section_count, offset = _deserialize_uint32(payload, offset)
-    sections, offset = _deserialize_texts(payload, section_count, offset)
-    _check_end(payload, offset)
-    return fields + (sections,)
-
-
-def _deserialize_splitter_article(payload):
-    fields, offset = _deserialize_texts(payload, 4)
-    _check_end(payload, offset)
-    return fields
-
-
-def _deserialize_word_language(payload):
-    fields, offset = _deserialize_texts(payload, 2)
-    _check_end(payload, offset)
-    return fields
-
-
-def _deserialize_word_amount(payload):
-    fields, offset = _deserialize_texts(payload, 1)
-    _check_end(payload, offset)
-    return fields
-
-
-def _deserialize_word_year_amount(payload):
-    fields, offset = _deserialize_texts(payload, 2)
-    amount, offset = _deserialize_uint32(payload, offset)
-    _check_end(payload, offset)
-    return fields + (amount,)
-
-
-def _deserialize_split_word(payload):
-    fields, offset = _deserialize_texts(payload, 4)
-    amount, offset = _deserialize_uint32(payload, offset)
-    _check_end(payload, offset)
-    return fields + (amount,)
-
-
-def _deserialize_word_batch(payload):
-    language, offset = _deserialize_text(payload, 0)
-    count, offset = _deserialize_uint32(payload, offset)
-    words = []
-    for _ in range(count):
-        word, offset = _deserialize_text(payload, offset)
-        words.append(word)
-    _check_end(payload, offset)
-    return language, words
-
-
-def _deserialize_get_image(payload):
-    fields, offset = _deserialize_texts(payload, 3)
-    _check_end(payload, offset)
-    return fields
-
-
-def _deserialize_query1_result(payload):
-    fields, offset = _deserialize_texts(payload, 2)
-    _check_end(payload, offset)
-    return fields
-
-def _deserialize_query2_result(payload):
-    fields, offset = _deserialize_texts(payload, 2)
-    image_size, offset = _deserialize_uint32(payload, offset)
-    if offset + image_size > len(payload):
-        raise ValueError("Incomplete image bytes")
-    image_bytes = payload[offset:offset + image_size]
-    offset += image_size
-    _check_end(payload, offset)
-    return fields + (image_bytes,)
-
-def _deserialize_query3_result(payload):
-    fields, offset = _deserialize_texts(payload, 1)
-    _check_end(payload, offset)
-    return fields
-
-def _deserialize_query4_result(payload):
-    top_list_count, offset = _deserialize_uint32(payload, 0)
-    top_list = []
-    for _ in range(top_list_count):
-        word, offset = _deserialize_text(payload, offset)
-        amount, offset = _deserialize_uint32(payload, offset)
-        top_list.append((word, amount))
-    _check_end(payload, offset)
-    return (top_list,)
-
-
-def _deserialize_query5_result(payload):
-    fields, offset = _deserialize_texts(payload, 1)
-    amount, offset = _deserialize_uint32(payload, offset)
-    _check_end(payload, offset)
-    return fields + (amount,)
-
-def _deserialize_end(payload):
-    message_type, offset = _deserialize_uint32(payload, 0)
-    _check_end(payload, offset)
-    return (message_type,)
-
-def _deserialize_empty(payload):
-    _check_end(payload, 0)
-    return ()
-
-
-RECV_MSG_HANDLERS = {
-    MsgType.WORD_BATCH: _deserialize_word_batch,
-    MsgType.BASELINE_END: _deserialize_empty,
-    MsgType.SPLIT_WORD: _deserialize_split_word,
-    MsgType.FILTER_ARTICLE: _deserialize_filter_article,
-    MsgType.SPLITTER_ARTICLE: _deserialize_splitter_article,
-    MsgType.WORD_LANGUAGE: _deserialize_word_language,
-    MsgType.WORD_AMOUNT: _deserialize_word_amount,
-    MsgType.WORD_YEAR_AMOUNT: _deserialize_word_year_amount,
-    MsgType.GET_IMAGE: _deserialize_get_image,
-    MsgType.Q1_RESULT: _deserialize_query1_result,
-    MsgType.Q2_RESULT: _deserialize_query2_result,
-    MsgType.Q3_RESULT: _deserialize_query3_result,
-    MsgType.Q4_RESULT: _deserialize_query4_result,
-    MsgType.Q5_RESULT: _deserialize_query5_result,
-    MsgType.END_OF_RECORDS: _deserialize_empty,
-    MsgType.QUERY_END: _deserialize_end,
-}
-
-SEND_MSG_HANDLERS = {
-    MsgType.WORD_BATCH: _serialize_word_batch,
-    MsgType.BASELINE_END: _serialize_empty,
-    MsgType.SPLIT_WORD: _serialize_split_word,
-    MsgType.FILTER_ARTICLE: _serialize_filter_article,
-    MsgType.SPLITTER_ARTICLE: _serialize_splitter_article,
-    MsgType.WORD_LANGUAGE: _serialize_word_language,
-    MsgType.WORD_AMOUNT: _serialize_word_amount,
-    MsgType.WORD_YEAR_AMOUNT: _serialize_word_year_amount,
-    MsgType.GET_IMAGE: _serialize_get_image,
-    MsgType.Q1_RESULT: _serialize_query1_result,
-    MsgType.Q2_RESULT: _serialize_query2_result,
-    MsgType.Q3_RESULT: _serialize_query3_result,
-    MsgType.Q4_RESULT: _serialize_query4_result,
-    MsgType.Q5_RESULT: _serialize_query5_result,
-    MsgType.END_OF_RECORDS: _serialize_empty,
-    MsgType.QUERY_END: _serialize_end,
-}
-
-
-def serialize_payload(message_type, *fields):
-    if message_type not in SEND_MSG_HANDLERS:
-        raise ValueError("Unknown internal message type")
-    return SEND_MSG_HANDLERS[message_type](*fields)
-
-
-def deserialize_payload(message_type, payload):
-    if message_type not in RECV_MSG_HANDLERS:
-        raise ValueError("Unknown internal message type")
-    return RECV_MSG_HANDLERS[message_type](payload)
+    return tuple(decode_fields(payload))
 
 
 def serialize_msg(message_type, client_id, *fields):
-    payload = serialize_payload(message_type, *fields)
-    return _serialize(message_type, client_id, payload)
+    payload = _serialize_payload(message_type, *fields)
+    return (
+        int(message_type).to_bytes(UINT32_SIZE, "big")
+        + client_id.to_bytes(UINT32_SIZE, "big")
+        + len(payload).to_bytes(UINT32_SIZE, "big")
+        + payload
+    )
 
 
 def deserialize_msg(message):
-    message_type, client_id, payload = _deserialize(message)
-    fields = deserialize_payload(message_type, payload)
+    if len(message) < HEADER_SIZE:
+        raise ValueError("Incomplete internal header")
+
+    message_type = int.from_bytes(
+        message[MESSAGE_TYPE_OFFSET:CLIENT_ID_OFFSET], "big"
+    )
+    client_id = int.from_bytes(
+        message[CLIENT_ID_OFFSET:PAYLOAD_SIZE_OFFSET], "big"
+    )
+    size = int.from_bytes(
+        message[PAYLOAD_SIZE_OFFSET:HEADER_SIZE], "big"
+    )
+
+    if size != len(message) - HEADER_SIZE:
+        raise ValueError(
+            "Internal payload length does not match the message"
+        )
+    
+    payload = message[HEADER_SIZE:]
+
+    fields = _deserialize_payload(message_type, payload)
     return message_type, client_id, fields
