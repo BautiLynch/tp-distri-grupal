@@ -1,4 +1,13 @@
+"""Protocolo entre el cliente y el sistema (gateway y handler).
+
+Cada mensaje es [tipo: uint32][largo del payload: uint32][payload], donde el
+payload son los campos codificados con el formato TLV de `fields`.
+`recv_msg` siempre devuelve (tipo, tupla de campos).
+"""
+
 from enum import IntEnum, auto
+
+from .fields import UINT32_SIZE, decode_fields, encode_fields
 
 
 class MsgType(IntEnum):
@@ -9,7 +18,26 @@ class MsgType(IntEnum):
     HANDLER_ADDRESS = auto()
     RESULT = auto()
 
-UINT32_SIZE = 4
+
+class QueryId(IntEnum):
+    Q1 = 1
+    Q2 = 2
+    Q3 = 3
+    Q4 = 4
+    Q5 = 5
+
+
+HEADER_SIZE = 2 * UINT32_SIZE
+
+# Cantidad de campos de cada resultado, sin contar el query ID.
+RESULT_FIELD_COUNTS = {
+    QueryId.Q1: 2,  # url, date_modified
+    QueryId.Q2: 3,  # name, url, image
+    QueryId.Q3: 1,  # word
+    QueryId.Q4: 1,  # [(word, amount), ...]
+    QueryId.Q5: 2,  # url, amount
+}
+
 
 def recv_all(connection, size):
     data = bytearray()
@@ -30,121 +58,79 @@ def send_all(connection, data):
         view = view[sent:]
 
 
-def _recv_uint32(connection):
-    return int.from_bytes(recv_all(connection, UINT32_SIZE), byteorder="big")
+def _expect_fields(fields, count, name):
+    if len(fields) != count:
+        raise ValueError(f"{name} expects {count} fields, got {len(fields)}")
 
 
-def _serialize_uint32(value):
-    return value.to_bytes(UINT32_SIZE, byteorder="big")
+def _validate_article(*fields):
+    _expect_fields(fields, 1, "ARTICLE")
+    if not isinstance(fields[0], bytes):
+        raise ValueError("Article must be bytes")
 
 
-def _validate_id(client_id):
+def _validate_client_id(*fields):
+    _expect_fields(fields, 1, "CLIENT_ID")
+    client_id, = fields
     if type(client_id) is not int or client_id <= 0:
         raise ValueError("Client ID must be a positive integer")
 
 
-def _recv_client_id(connection):
-    client_id = _recv_uint32(connection)
-    _validate_id(client_id)
-    return client_id
+def _validate_empty(*fields):
+    _expect_fields(fields, 0, "Message")
 
 
-def _serialize_client_id(client_id):
-    _validate_id(client_id)
-    return _serialize_uint32(client_id)
-
-
-def _recv_bytes(connection):
-    size = _recv_uint32(connection)
-    return recv_all(connection, size)
-
-
-def _serialize_bytes(value):
-    if not isinstance(value, bytes):
-        raise ValueError("Expected bytes")
-    return _serialize_uint32(len(value)) + value
-
-
-def _recv_text(connection):
-    return _recv_bytes(connection).decode("utf-8")
-
-
-def _serialize_text(value):
-    return _serialize_bytes(value.encode("utf-8"))
-
-
-def _recv_handler_address(connection):
-    host = _recv_text(connection)
-    port = _recv_uint32(connection)
-    _validate_address(host, port)
-    return host, port
-
-
-def _validate_address(host, port):
+def _validate_handler_address(*fields):
+    _expect_fields(fields, 2, "HANDLER_ADDRESS")
+    host, port = fields
     if not isinstance(host, str) or not host.strip():
         raise ValueError("Handler host must not be empty")
     if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError("Handler port must be between 1 and 65535")
 
 
-def _serialize_handler_address(host, port):
-    _validate_address(host, port)
-    return _serialize_text(host) + _serialize_uint32(port)
-
-def _recv_result(connection):
-    query_id = _recv_uint32(connection)
-    if query_id == 0:
-        raise ValueError("Query ID must be positive")
-    return query_id, _recv_bytes(connection)
+def _validate_result(*fields):
+    if not fields:
+        raise ValueError("RESULT requires a query ID")
+    query_id, *values = fields
+    if query_id not in RESULT_FIELD_COUNTS:
+        raise ValueError(f"Unknown query ID: {query_id}")
+    _expect_fields(values, RESULT_FIELD_COUNTS[query_id], f"Query {query_id}")
 
 
-def _serialize_result(query_id, payload):
-    if type(query_id) is not int or query_id <= 0:
-        raise ValueError("Query ID must be positive")
-    return _serialize_uint32(query_id) + _serialize_bytes(payload)
-
-
-def _recv_empty(connection):
-    return None
-
-
-def _serialize_empty():
-    return b""
-
-
-RECV_MSG_HANDLERS = {
-    MsgType.ARTICLE: _recv_bytes,
-    MsgType.CLIENT_ID: _recv_client_id,
-    MsgType.ACK: _recv_empty,
-    MsgType.END_OF_RECORDS: _recv_empty,
-    MsgType.HANDLER_ADDRESS: _recv_handler_address,
-    MsgType.RESULT: _recv_result,
+VALIDATORS = {
+    MsgType.ARTICLE: _validate_article,
+    MsgType.CLIENT_ID: _validate_client_id,
+    MsgType.ACK: _validate_empty,
+    MsgType.END_OF_RECORDS: _validate_empty,
+    MsgType.HANDLER_ADDRESS: _validate_handler_address,
+    MsgType.RESULT: _validate_result,
 }
 
-SEND_MSG_HANDLERS = {
-    MsgType.ARTICLE: _serialize_bytes,
-    MsgType.CLIENT_ID: _serialize_client_id,
-    MsgType.ACK: _serialize_empty,
-    MsgType.END_OF_RECORDS: _serialize_empty,
-    MsgType.HANDLER_ADDRESS: _serialize_handler_address,
-    MsgType.RESULT: _serialize_result,
-}
+
+def _validate(message_type, fields):
+    if message_type not in VALIDATORS:
+        raise ValueError(f"Unknown message type: {message_type}")
+    VALIDATORS[message_type](*fields)
+
+def serialize_msg(message_type, *fields):
+    _validate(message_type, fields)
+    payload = encode_fields(*fields)
+    return (
+        int(message_type).to_bytes(UINT32_SIZE, "big")
+        + len(payload).to_bytes(UINT32_SIZE, "big")
+        + payload
+    )
 
 
 def recv_msg(connection):
-    message_type = _recv_uint32(connection)
-    if message_type not in RECV_MSG_HANDLERS:
-        raise ValueError("Unknown message type")
-    message = RECV_MSG_HANDLERS[message_type](connection)
-    return message_type, message
+    header = recv_all(connection, HEADER_SIZE)
+    message_type = int.from_bytes(header[:UINT32_SIZE], "big")
+    size = int.from_bytes(header[UINT32_SIZE:], "big")
+    fields = decode_fields(recv_all(connection, size))
+    _validate(message_type, fields)
+    return MsgType(message_type), fields
 
 
-def serialize_msg(message_type, *args):
-    if message_type not in SEND_MSG_HANDLERS:
-        raise ValueError("Unknown message type")
-    payload = SEND_MSG_HANDLERS[message_type](*args)
-    return _serialize_uint32(message_type) + payload
-
-
-def send_msg(connection, message_type, *args):
-    send_all(connection, serialize_msg(message_type, *args))
+def send_msg(connection, message_type, *fields):
+    send_all(connection, serialize_msg(message_type, *fields))

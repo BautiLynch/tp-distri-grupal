@@ -25,8 +25,14 @@ import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Formato de resto.bin: ver src/common/message_protocol/{external,fields}.py
 RESULT = 6
 UINT32_SIZE = 4
+MESSAGE_HEADER_SIZE = 2 * UINT32_SIZE
+FIELD_HEADER_SIZE = 1 + UINT32_SIZE
+TYPE_INT = 1
+TYPE_TEXT = 2
+TYPE_BYTES = 3
 
 
 # --------------------------------------------------------------------------- #
@@ -99,40 +105,58 @@ def load_reference(path):
 # --------------------------------------------------------------------------- #
 # Lectura de las carpetas de salida
 # --------------------------------------------------------------------------- #
-def read_records(path):
+def read_exact(handle, size):
+    data = handle.read(size)
+    if len(data) != size:
+        raise ValueError(f"{handle.name}: registro truncado en el byte {handle.tell() - len(data)}")
+    return data
+
+
+def read_uint32(handle):
+    return struct.unpack(">I", read_exact(handle, 4))[0]
+
+
+def read_field_header(handle, expected_type):
+    field_type, size = struct.unpack(">BI", read_exact(handle, FIELD_HEADER_SIZE))
+    if field_type != expected_type:
+        raise ValueError(f"{handle.name}: campo de tipo {field_type}, se esperaba {expected_type}")
+    return size
+
+
+def read_int_field(handle):
+    if read_field_header(handle, TYPE_INT) != UINT32_SIZE:
+        raise ValueError(f"{handle.name}: entero con largo invalido")
+    return read_uint32(handle)
+
+
+def read_text_field(handle):
+    return read_exact(handle, read_field_header(handle, TYPE_TEXT)).decode("utf-8")
+
+
+def read_q2_records(path):
+    """resto.bin guarda solo mensajes RESULT de Q2 del protocolo externo, uno
+    atras del otro: [tipo][largo del payload] y el payload TLV con
+    query_id (int), name (text), url (text) e imagen (bytes)."""
+    file_size = os.path.getsize(path)
     with open(path, "rb") as handle:
         while True:
-            header = handle.read(12)
+            header = handle.read(MESSAGE_HEADER_SIZE)
             if not header:
                 return
-            if len(header) != 12:
+            if len(header) != MESSAGE_HEADER_SIZE:
                 raise ValueError(f"{path}: registro truncado en el byte {handle.tell() - len(header)}")
-            kind, query, size = struct.unpack(">III", header)
-            payload = handle.read(size)
-            if len(payload) != size:
-                raise ValueError(f"{path}: payload truncado en el byte {handle.tell() - len(payload)}")
-            yield kind, query, payload
-
-
-def read_text(payload, offset):
-    size, start = read_uint32(payload, offset)
-    if start + size > len(payload):
-        raise ValueError("texto truncado")
-    return payload[start:start + size].decode("utf-8"), start + size
-
-
-def read_uint32(payload, offset):
-    return struct.unpack(">I", payload[offset:offset + 4])[0], offset + 4
-
-
-def parse_q2_record(payload):
-    name, offset = read_text(payload, 0)
-    url, offset = read_text(payload, offset)
-    size, offset = read_uint32(payload, offset)
-    offset += size
-    if offset != len(payload):
-        raise ValueError("Q2: payload truncado o con bytes sobrantes")
-    return name, url, size
+            kind, payload_size = struct.unpack(">II", header)
+            payload_end = handle.tell() + payload_size
+            if payload_end > file_size:
+                raise ValueError(f"{path}: registro truncado en el byte {handle.tell()}")
+            query = read_int_field(handle)
+            name = read_text_field(handle)
+            url = read_text_field(handle)
+            image_size = read_field_header(handle, TYPE_BYTES)
+            if handle.tell() + image_size != payload_end:
+                raise ValueError(f"{path}: el largo del registro no coincide en el byte {handle.tell()}")
+            handle.seek(payload_end)
+            yield kind, query, name, url, image_size
 
 
 def load_json(path):
@@ -154,10 +178,10 @@ def verify_q2_images(path, records):
             raise ValueError(f"Q2: tamano incorrecto en {location}")
 
     stored = collections.Counter()
-    for kind, query, payload in read_records(os.path.join(q2_dir, "resto.bin")):
+    for kind, query, name, url, image_size in read_q2_records(os.path.join(q2_dir, "resto.bin")):
         if kind != RESULT or query != 2:
             raise ValueError(f"registro inesperado en resto.bin: {kind}, {query}")
-        stored[parse_q2_record(payload)] += 1
+        stored[(name, url, image_size)] += 1
     if stored != binary:
         raise ValueError("Q2: resto.bin no coincide con q2.json")
 
