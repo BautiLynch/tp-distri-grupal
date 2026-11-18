@@ -2,9 +2,8 @@ import os
 import logging
 
 from datetime import datetime
-import threading
-from time import sleep
 from common import middleware, hashing
+from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
 from common.message_protocol.internal import deserialize_msg, MsgType, serialize_msg
 
@@ -26,10 +25,8 @@ class FilterYearPlus:
     def __init__(self):
 
         # Nombre del servicio en el compose: el monitor lo usa para identificar y reiniciar al worker.
-        self.worker_name = f"filter_{ID}"
-        self.heartbeat = threading.Thread(
-            target=self._send_heartbeat,
-            name="heartbeat",
+        self.heartbeat = HeartbeatSender(
+            MOM_HOST, HEARTBEAT_EXCHANGE, ID, f"filter_{ID}", HEARTBEAT_INTERVAL
         )
 
         self.shutdown = GracefulShutdown()
@@ -44,19 +41,6 @@ class FilterYearPlus:
         )
 
         self.sections = {section.lower() for section in SECTIONS}
-
-    def _send_heartbeat(self):
-        self.heartbeat_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, HEARTBEAT_EXCHANGE, ["heartbeat"], consume=False
-        )
-
-        while True:
-            # TODO: sigterm
-            self.heartbeat_exchange.send_to(
-                serialize_msg(MsgType.HEARTBEAT, int(ID), self.worker_name),
-                routing_key="heartbeat",
-            )
-            sleep(HEARTBEAT_INTERVAL)
 
     def process_message(self, message, ack, nack):
         try:
@@ -87,6 +71,7 @@ class FilterYearPlus:
         ack()
 
     def close(self):
+        self.heartbeat.stop()
         for mom in [self.input_exchange, self.output_exchange, self.output_exchange_image]:
             try:
                 mom.close()
