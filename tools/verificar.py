@@ -159,8 +159,11 @@ def verify_q2_images(path, records):
         elif os.path.getsize(os.path.join(q2_dir, location)) != record["image_size"]:
             raise ValueError(f"Q2: tamano incorrecto en {location}")
 
+    binary_path = os.path.join(q2_dir, "resto.bin")
+    if not binary and not os.path.exists(binary_path):
+        return
     stored = collections.Counter()
-    for kind, query, payload in read_records(os.path.join(q2_dir, "resto.bin")):
+    for kind, query, payload in read_records(binary_path):
         if kind != RESULT or query != 2:
             raise ValueError(f"registro inesperado en resto.bin: {kind}, {query}")
         stored[parse_q2_record(payload)] += 1

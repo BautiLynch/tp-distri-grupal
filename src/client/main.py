@@ -24,17 +24,14 @@ def expect_message(connection, expected_type):
 
 class Client:
     def __init__(self, gateway_host, gateway_port, input_path, output_dir,
-                 connection_timeout=10, q2_image_limit=0):
+                 connection_timeout=10):
         if not gateway_host or not 1 <= gateway_port <= 65535:
             raise ValueError("Invalid gateway address")
         if not math.isfinite(connection_timeout) or connection_timeout <= 0:
             raise ValueError("CONNECTION_TIMEOUT must be positive and finite")
-        if q2_image_limit < 0:
-            raise ValueError("Q2_IMAGE_LIMIT must not be negative")
         self.gateway_address = (gateway_host, gateway_port)
         self.input_path = input_path
         self.output_dir = output_dir
-        self.q2_image_limit = q2_image_limit
         self.connection_timeout = connection_timeout
         self.stopping = threading.Event()
         self.receiver_ready = threading.Event()
@@ -132,7 +129,7 @@ class Client:
     def run(self):
         receiver = None
         with open(self.input_path, "rb") as source:
-            with ResultWriter(self.output_dir, self.q2_image_limit) as output:
+            with ResultWriter(self.output_dir) as output:
                 try:
                     gateway = self._connect(self.gateway_address, attempts=3)
                     client_id = expect_message(gateway, external.MsgType.CLIENT_ID)
@@ -183,7 +180,6 @@ def main():
             os.environ["GATEWAY_HOST"], int(os.environ["GATEWAY_PORT"]),
             os.environ["INPUT_PATH"], os.environ["OUTPUT_DIR"],
             float(os.environ.get("CONNECTION_TIMEOUT", "10")),
-            int(os.environ.get("Q2_IMAGE_LIMIT", "10")),
         )
         for sig in (signal.SIGTERM, signal.SIGINT):
             previous_handlers[sig] = signal.signal(sig, lambda signum, frame: client.stop())
