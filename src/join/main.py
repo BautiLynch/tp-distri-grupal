@@ -2,11 +2,14 @@ import os
 import logging
 
 from common import middleware
+from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
 from common.key_item import KeyItem
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 
 MOM_HOST = os.environ["MOM_HOST"]
+HEARTBEAT_EXCHANGE = os.environ["HEARTBEAT_EXCHANGE"]
+HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 INPUT_QUEUE = os.environ["INPUT_QUEUE"]
 OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 AGGREGATION_AMOUNT = int(os.environ["AGGREGATION_AMOUNT"])
@@ -15,6 +18,10 @@ TOP_SIZE = int(os.environ["TOP_SIZE"])
 class JoinFilter:
 
     def __init__(self):
+        # El nombre es el del servicio en el compose: el monitor lo usa para reiniciarlo.
+        self.heartbeat = HeartbeatSender(
+            MOM_HOST, HEARTBEAT_EXCHANGE, 0, "join", HEARTBEAT_INTERVAL
+        )
         self.shutdown = GracefulShutdown()
         self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, INPUT_QUEUE
@@ -70,6 +77,7 @@ class JoinFilter:
         ack()
 
     def close(self):
+        self.heartbeat.stop()
         for mom in [self.input_queue, self.output_exchange]:
             try:
                 mom.close()
@@ -77,6 +85,7 @@ class JoinFilter:
                 logging.error(f"Error closing message middleware: {e}")
     
     def start(self):
+        self.heartbeat.start()
         self.shutdown.run(self.input_queue, self.process_message, self.close)
 
 def main():

@@ -3,11 +3,14 @@ import os
 import logging
 
 from common import middleware, storage
+from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
+HEARTBEAT_EXCHANGE = os.environ["HEARTBEAT_EXCHANGE"]
+HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 OUTPUT_QUEUE = os.environ["OUTPUT_QUEUE"]
 SPLITTER_AMOUNT = int(os.environ["SPLITTER_AMOUNT"])
@@ -17,6 +20,10 @@ STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
 class AggregationFilter:
 
     def __init__(self):
+        # El nombre es el del servicio en el compose: el monitor lo usa para reiniciarlo.
+        self.heartbeat = HeartbeatSender(
+            MOM_HOST, HEARTBEAT_EXCHANGE, ID, f"aggregation_{ID}", HEARTBEAT_INTERVAL
+        )
         self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [f"words_{ID}"], consume=True, queue_name=f"aggregation_{ID}"
@@ -63,6 +70,7 @@ class AggregationFilter:
         ack()
 
     def close(self):
+        self.heartbeat.stop()
         for mom in [self.input_exchange, self.output_queue]:
             try:
                 mom.close()
@@ -70,6 +78,7 @@ class AggregationFilter:
                 logging.error(f"Error closing message middleware: {e}")
 
     def start(self):
+        self.heartbeat.start()
         self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 def main():
