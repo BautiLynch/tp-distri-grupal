@@ -1,6 +1,7 @@
 import heapq
 import os
 import logging
+import sys
 
 from common import middleware, storage
 from common.shutdown import GracefulShutdown
@@ -84,4 +85,4 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

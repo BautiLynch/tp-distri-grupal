@@ -6,6 +6,7 @@ import signal
 import socket
 import threading
 import time
+import sys
 
 from common.message_protocol import external
 from results import ResultWriter
@@ -206,4 +207,4 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

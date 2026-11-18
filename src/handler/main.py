@@ -4,6 +4,7 @@ import socket
 import signal
 import threading
 import multiprocessing
+import sys
 
 from common import middleware
 from common.message_protocol.internal import deserialize_msg, serialize_payload, MsgType as InternalMsgType
@@ -220,4 +221,4 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

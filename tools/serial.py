@@ -171,6 +171,6 @@ def main():
 if __name__ == "__main__":
     started_at = time.perf_counter()
     try:
-        raise SystemExit(main())
+        sys.exit(main())
     finally:
         print(f"Tiempo total: {time.perf_counter() - started_at:.3f} segundos", file=sys.stderr)
