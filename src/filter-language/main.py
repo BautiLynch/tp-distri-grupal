@@ -4,6 +4,7 @@ import logging
 from common import middleware
 from common.shutdown import GracefulShutdown
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
+from common.message_protocol.queries import QueryId
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
@@ -42,13 +43,13 @@ class FilterLanguage:
                     word_sent[word] = language_sent
                     if len(language_sent) == 2:
                         self.output_exchange.send_to(
-                            serialize_msg(MsgType.Q3_RESULT, client_id, word), routing_key=client_id
+                            serialize_msg(MsgType.RESULT, client_id, QueryId.Q3, word), routing_key=client_id
                         )
 
         elif message_type == MsgType.END_OF_RECORDS:
             self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
             if self.eof_by_client[client_id] == SPLITTER_AMOUNT:
-                self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q3_RESULT), routing_key=client_id)
+                self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, QueryId.Q3), routing_key=client_id)
                 self._release_client(client_id)
 
         else:
