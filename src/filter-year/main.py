@@ -3,11 +3,14 @@ import logging
 
 from datetime import datetime
 from common import middleware, hashing
+from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
+HEARTBEAT_EXCHANGE = os.environ["HEARTBEAT_EXCHANGE"]
+HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 AVERAGE_EXCHANGE = os.environ["AVERAGE_EXCHANGE"]
 AVERAGE_AMOUNT = int(os.environ.get("AVERAGE_AMOUNT"))
@@ -21,9 +24,13 @@ YEAR = int(os.environ.get("YEAR"))
 class FilterYear:
 
     def __init__(self):
+        # El nombre es el del servicio en el compose: el monitor lo usa para reiniciarlo.
+        self.heartbeat = HeartbeatSender(
+            MOM_HOST, HEARTBEAT_EXCHANGE, ID, f"filter_year_{ID}", HEARTBEAT_INTERVAL
+        )
         self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [f"urls_{ID}"], consume=True
+            MOM_HOST, INPUT_EXCHANGE, [f"urls_{ID}"], consume=True, queue_name=f"filter_year_{ID}"
         )
         self.output_exchange_average = middleware.MessageMiddlewareExchangeRabbitMQ( 
             MOM_HOST, AVERAGE_EXCHANGE, [f"{index}" for index in range(AVERAGE_AMOUNT)], consume=False
@@ -66,6 +73,7 @@ class FilterYear:
         self.eof_by_client.pop(client_id, None)
 
     def close(self):
+        self.heartbeat.stop()
         for mom in [self.input_exchange, self.output_exchange_average, self.output_exchange_filter_average]:
             try:
                 mom.close()
@@ -73,6 +81,7 @@ class FilterYear:
                 logging.error(f"Error closing message middleware: {e}")
 
     def start(self):
+        self.heartbeat.start()
         self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 def main():

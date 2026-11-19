@@ -1,13 +1,12 @@
 import os
 import logging
-import socket
 
 from datetime import datetime
-import threading
-from time import sleep
 from common import middleware, hashing
+from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
 from common.message_protocol.internal import deserialize_msg, MsgType, serialize_msg
+from common.message_protocol.queries import QueryId
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
@@ -26,15 +25,14 @@ YEAR = int(os.environ["YEAR"])
 class FilterYearPlus:
     def __init__(self):
 
-        self.container_id = socket.gethostname()
-        self.heartbeat = threading.Thread(
-            target=self._send_heartbeat,
-            name="heartbeat",
+        # Nombre del servicio en el compose: el monitor lo usa para identificar y reiniciar al worker.
+        self.heartbeat = HeartbeatSender(
+            MOM_HOST, HEARTBEAT_EXCHANGE, ID, f"filter_{ID}", HEARTBEAT_INTERVAL
         )
 
         self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
+            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True, queue_name=f"filter_{ID}"
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ( 
             MOM_HOST, OUTPUT_EXCHANGE_1, [], consume=False
@@ -45,19 +43,6 @@ class FilterYearPlus:
 
         self.sections = {section.lower() for section in SECTIONS}
 
-    def _send_heartbeat(self):
-        self.heartbeat_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, HEARTBEAT_EXCHANGE, ["heartbeat"], consume=False
-        )
-
-        while True:
-            # TODO: sigterm
-            self.heartbeat_exchange.send_to(
-                serialize_msg(MsgType.HEARTBEAT, int(ID), self.container_id),
-                routing_key="heartbeat",
-            )
-            sleep(HEARTBEAT_INTERVAL)
-
     def process_message(self, message, ack, nack):
         try:
             message_type, client_id, fields = deserialize_msg(message)
@@ -66,7 +51,7 @@ class FilterYearPlus:
 
                 if datetime.fromisoformat(date_modified.replace("Z", "+00:00")).year <= YEAR:
                     if language.lower() == LANGUAGE.lower():
-                        self.output_exchange.send_to(serialize_msg(MsgType.Q1_RESULT, client_id, url, date_modified), routing_key=client_id)
+                        self.output_exchange.send_to(serialize_msg(MsgType.RESULT, client_id, QueryId.Q1, url, date_modified), routing_key=client_id)
 
                     if self.sections.intersection(section.lower() for section in sections):
                         key = hashing.get_hash_key(f"{client_id}_{url}", IMAGE_GETTER_AMOUNT)
@@ -76,7 +61,7 @@ class FilterYearPlus:
                         )
             
             elif message_type == MsgType.END_OF_RECORDS:
-                self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q1_RESULT), routing_key=client_id)
+                self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, QueryId.Q1), routing_key=client_id)
                 self.output_exchange_image.send(serialize_msg(MsgType.END_OF_RECORDS, client_id))
 
         except Exception:
@@ -87,6 +72,7 @@ class FilterYearPlus:
         ack()
 
     def close(self):
+        self.heartbeat.stop()
         for mom in [self.input_exchange, self.output_exchange, self.output_exchange_image]:
             try:
                 mom.close()

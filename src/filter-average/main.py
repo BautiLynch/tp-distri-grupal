@@ -3,11 +3,15 @@ import os
 import logging
 
 from common import middleware
+from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
+from common.message_protocol.queries import QueryId
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
+HEARTBEAT_EXCHANGE = os.environ["HEARTBEAT_EXCHANGE"]
+HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 
@@ -20,9 +24,13 @@ YEAR = int(os.environ["YEAR"])
 class FilterAverage:
 
     def __init__(self):
+        # El nombre es el del servicio en el compose: el monitor lo usa para reiniciarlo.
+        self.heartbeat = HeartbeatSender(
+            MOM_HOST, HEARTBEAT_EXCHANGE, ID, f"filter_average_{ID}", HEARTBEAT_INTERVAL
+        )
         self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
+            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True, queue_name=f"filter_average_{ID}"
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ( 
             MOM_HOST, OUTPUT_EXCHANGE, [], consume=False
@@ -51,7 +59,7 @@ class FilterAverage:
                 self._process_abstract(client_id, url, amount_words)
 
         if eof["total"] == FILTER_YEAR_AMOUNT + AVERAGE_AMOUNT:
-            self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q5_RESULT), routing_key=client_id)
+            self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, QueryId.Q5), routing_key=client_id)
             self._release_client(client_id)
 
     def _release_client(self, client_id):
@@ -66,7 +74,7 @@ class FilterAverage:
             return
         
         if amount_words > self.average_by_client[client_id]:
-            self.output_exchange.send_to(serialize_msg(MsgType.Q5_RESULT, client_id, url, amount_words), routing_key=client_id)
+            self.output_exchange.send_to(serialize_msg(MsgType.RESULT, client_id, QueryId.Q5, url, amount_words), routing_key=client_id)
 
     def process_message(self, message, ack, nack):
         message_type, client_id, fields = deserialize_msg(message)
@@ -88,6 +96,7 @@ class FilterAverage:
         ack()
 
     def close(self):
+        self.heartbeat.stop()
         for mom in [self.input_exchange, self.output_exchange]:
             try:
                 mom.close()
@@ -95,6 +104,7 @@ class FilterAverage:
                 logging.error(f"Error closing message middleware: {e}")
 
     def start(self):
+        self.heartbeat.start()
         self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 def main():

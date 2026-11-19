@@ -6,8 +6,9 @@ import threading
 import multiprocessing
 
 from common import middleware
-from common.message_protocol.internal import deserialize_msg, serialize_payload, MsgType as InternalMsgType
+from common.message_protocol.internal import deserialize_msg, MsgType as InternalMsgType
 from common.message_protocol.external import recv_msg, send_msg, MsgType as ExternalMsgType
+from common.message_protocol.queries import QueryId
 
 SERVER_HOST = os.environ["SERVER_HOST"]
 SERVER_PORT = int(os.environ["SERVER_PORT"])
@@ -15,11 +16,8 @@ MOM_HOST = os.environ["MOM_HOST"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 
 QUERY_REPLICAS = {
-    "q1": int(os.environ["QUERY_1_REPLICAS"]),
-    "q2": int(os.environ["QUERY_2_REPLICAS"]),
-    "q3": int(os.environ["QUERY_3_REPLICAS"]),
-    "q4": int(os.environ["QUERY_4_REPLICAS"]),
-    "q5": int(os.environ["QUERY_5_REPLICAS"]),
+    query_id: int(os.environ[f"QUERY_{query_id.value}_REPLICAS"])
+    for query_id in QueryId
 }
 if any(amount < 1 for amount in QUERY_REPLICAS.values()):
     raise ValueError("Every QUERY_<id>_REPLICAS must be greater than zero")
@@ -30,23 +28,18 @@ class ClientHandler:
         self.client_socket = client_socket
         self.client_id = None
         self.input_exchange = None
-        self.query_end_counts = {
-            "q1": 0,
-            "q2": 0,
-            "q3": 0,
-            "q4": 0,
-            "q5": 0,
-        }
+        self.query_end_counts = {query_id: 0 for query_id in QueryId}
         self.completed_queries = set()
         self.finished = False
         self.stopping = False
 
     def run(self):
-        message_type, client_id = recv_msg(
+        message_type, fields = recv_msg(
             self.client_socket
         )
         if message_type != ExternalMsgType.CLIENT_ID:
             raise ValueError("Expected a client ID to register the connection")
+        client_id, = fields
         self.client_id = client_id
         if self.stopping:
             return
@@ -68,28 +61,25 @@ class ClientHandler:
                 deserialize_msg(message)
             )
             if message_type == InternalMsgType.QUERY_END:
-                query_id, = fields
-                query_name = f"q{query_id}"
-                self.query_end_counts[query_name] += 1
-                if self.query_end_counts[query_name] == QUERY_REPLICAS[query_name]:
+                query_id = QueryId(fields[0])
+                self.query_end_counts[query_id] += 1
+                if self.query_end_counts[query_id] == QUERY_REPLICAS[query_id]:
                     logging.info(
                         "Client %s completed query %s",
                         self.client_id,
-                        query_name,
+                        query_id.name,
                     )
-                    self.completed_queries.add(query_name)
+                    self.completed_queries.add(query_id)
                 self.finished = len(self.completed_queries) == len(QUERY_REPLICAS)
                 if self.finished:
                     send_msg(
                         self.client_socket,
                         ExternalMsgType.END_OF_RECORDS,
                     )
+            elif message_type == InternalMsgType.RESULT:
+                send_msg(self.client_socket, ExternalMsgType.RESULT, *fields)
             else:
-                payload = serialize_payload(message_type, *fields)
-                send_msg(
-                    self.client_socket, ExternalMsgType.RESULT, message_type,
-                    payload,
-                )
+                raise ValueError(f"Unexpected handler message type: {message_type}")
         except Exception:
             nack()
             raise

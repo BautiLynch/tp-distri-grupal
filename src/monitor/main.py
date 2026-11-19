@@ -1,19 +1,32 @@
 import docker
 import os
 import logging
+import socket
 import threading
 import time
 
-from docker.errors import NotFound, APIError
+from docker.errors import APIError
 from common import middleware
 from common.message_protocol.internal import deserialize_msg, MsgType
 
+ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 HEARTBEAT_ALLOWED_MISSES = int(os.environ.get("HEARTBEAT_ALLOWED_MISSES", 3))
 
 client = docker.from_env()
+
+# Docker Compose etiqueta cada contenedor con su proyecto y su servicio.
+# El proyecto se toma del propio monitor, para no tocar contenedores de otros despliegues.
+PROJECT = client.containers.get(socket.gethostname()).labels["com.docker.compose.project"]
+
+
+def find_containers(service):
+    return client.containers.list(all=True, filters={"label": [
+        f"com.docker.compose.project={PROJECT}",
+        f"com.docker.compose.service={service}",
+    ]})
 
 class Monitor:
     def __init__(self):
@@ -28,7 +41,8 @@ class Monitor:
         )
 
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, ["heartbeat"], consume=True
+            MOM_HOST, INPUT_EXCHANGE, ["heartbeat"], consume=True,
+            queue_name=f"monitor_{ID}",
         )
 
     def _watch_heartbeats(self):
@@ -41,38 +55,43 @@ class Monitor:
                     self.condition.wait()
                     continue
 
-                container_id = min(
+                worker = min(
                     self.heartbeats,
                     key=self.heartbeats.get,
                 )
 
                 remaining = (
-                    self.heartbeats[container_id] - time.monotonic()
+                    self.heartbeats[worker] - time.monotonic()
                 )
 
                 if remaining > 0:
                     self.condition.wait(timeout=remaining)
                     continue
 
-                del self.heartbeats[container_id]
+                del self.heartbeats[worker]
 
             threading.Thread(
                 target=self._heartbeat_exceeded,
-                args=(container_id,),
-                name=f"heartbeat-exceeded-{container_id}",
+                args=(worker,),
+                name=f"heartbeat-exceeded-{worker}",
             ).start()
 
-    def _heartbeat_exceeded(self, container_id):
-        logging.info(f"Container {container_id} heartbeat exceeded")
+    def _heartbeat_exceeded(self, worker):
+        logging.info(f"{worker} heartbeat exceeded")
 
         try:
-            client.containers.get(container_id).restart()
-        except NotFound as e:
-            logging.error(f"Container {container_id} not found: {e}")
+            containers = find_containers(worker)
+            if not containers:
+                logging.error(f"No container found for {worker}")
+                return
+
+            for container in containers:
+                logging.info(f"Restarting {worker} (container {container.name})")
+                container.restart()
         except APIError as e:
-            logging.error(f"Error starting container {container_id}: {e}")
+            logging.error(f"Error restarting {worker}: {e}")
         except Exception as e:
-            logging.error(f"Unexpected error while starting container {container_id}: {e}")
+            logging.error(f"Unexpected error while restarting {worker}: {e}")
 
     def process_heartbeat(self, message, ack, nack):
         try:
@@ -83,12 +102,12 @@ class Monitor:
                 nack()
                 return
             
-            container_id, = fields
+            worker, = fields
 
-            logging.info(f"Received heartbeat from container {container_id}")
+            logging.info(f"Received heartbeat from {worker}")
 
             with self.condition:
-                self.heartbeats[container_id] = (
+                self.heartbeats[worker] = (
                     time.monotonic() + HEARTBEAT_INTERVAL * HEARTBEAT_ALLOWED_MISSES
                 )
                 self.condition.notify()
