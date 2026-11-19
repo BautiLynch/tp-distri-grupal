@@ -79,31 +79,32 @@ class ResultWriter:
         self.remaining_images.close()
 
     def write(self, query_id, fields):
-        if query_id not in self.writers:
-            raise ValueError(f"Unexpected query result {query_id}")
-        writer = self.writers[query_id]
-        if query_id == QueryId.Q1:
-            url, date_modified = fields
-            writer.write({"url": url, "date_modified": date_modified})
-        elif query_id == QueryId.Q2:
-            name, url, image = fields
-            location = self._store_image(query_id, fields, image)
-            writer.write({
-                "name": name,
-                "url": url,
-                "image": location,
-                "image_size": len(image),
-            })
-        elif query_id == QueryId.Q3:
-            word, = fields
-            writer.write({"word": word})
-        elif query_id == QueryId.Q4:
-            top_list, = fields
-            for word, amount in top_list:
-                writer.write({"word": word, "amount": amount})
-        else:
-            url, amount = fields
-            writer.write({"url": url, "amount": amount})
+        writer = self.writers.get(query_id)
+        match query_id:
+            case QueryId.Q1:
+                url, date_modified = fields
+                writer.write({"url": url, "date_modified": date_modified})
+            case QueryId.Q2:
+                name, url, image = fields
+                location = self._store_image(query_id, fields, image)
+                writer.write({
+                    "name": name,
+                    "url": url,
+                    "image": location,
+                    "image_size": len(image),
+                })
+            case QueryId.Q3:
+                word, = fields
+                writer.write({"word": word})
+            case QueryId.Q4:
+                top_list, = fields
+                for word, amount in top_list:
+                    writer.write({"word": word, "amount": amount})
+            case QueryId.Q5:
+                url, amount = fields
+                writer.write({"url": url, "amount": amount})
+            case _:
+                raise ValueError(f"Unexpected query result {query_id}")
 
     def _store_image(self, query_id, fields, image):
         if not image:

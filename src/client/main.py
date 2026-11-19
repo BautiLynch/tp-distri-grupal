@@ -42,13 +42,11 @@ class Client:
         self.connections = []
         self.connections_lock = threading.RLock()
 
-    def interrupt(self):
-        # Se llama solo desde el handler de señales: distingue una
+    def stop(self, interrupted=False):
+        # interrupted=True solo desde el handler de señales: distingue una
         # interrupción externa de un stop() interno por un error.
-        self.interrupted.set()
-        self.stop()
-
-    def stop(self):
+        if interrupted:
+            self.interrupted.set()
         self.stopping.set()
         with self.connections_lock:
             for connection in self.connections:
@@ -193,7 +191,7 @@ def main():
             int(os.environ.get("Q2_IMAGE_LIMIT", "10")),
         )
         for sig in (signal.SIGTERM, signal.SIGINT):
-            previous_handlers[sig] = signal.signal(sig, lambda signum, frame: client.interrupt())
+            previous_handlers[sig] = signal.signal(sig, lambda signum, frame: client.stop(interrupted=True))
         client.run()
         completed = True
     except Exception:
