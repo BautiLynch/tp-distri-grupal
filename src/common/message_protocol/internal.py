@@ -15,6 +15,7 @@ class MsgType(IntEnum):
     BASELINE_END = auto()
     WORD_BATCH = auto()
     HEARTBEAT = auto()
+    GOSSIP = auto()
 
 
 MESSAGE_TYPE_OFFSET = 0
