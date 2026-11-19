@@ -3,7 +3,7 @@ import json
 import os
 
 from common.message_protocol import external
-from common.message_protocol.external import QueryId
+from common.message_protocol.queries import QueryId
 
 Q2_DIRECTORY = "q2"
 Q2_REMAINING_FILE = "resto.bin"

@@ -4,20 +4,14 @@ from .fields import UINT32_SIZE, decode_fields, encode_fields
 
 
 class MsgType(IntEnum):
-    Q1_RESULT = 1
-    Q2_RESULT = auto()
-    Q3_RESULT = auto()
-    Q4_RESULT = auto()
-    Q5_RESULT = auto()
+    RESULT = 1
     QUERY_END = auto()
-    WORD_LANGUAGE = auto()
-    WORD_AMOUNT = auto()
+    PARTIAL_TOP = auto()
     WORD_YEAR_AMOUNT = auto()
     END_OF_RECORDS = auto()
     SPLITTER_ARTICLE = auto()
     GET_IMAGE = auto()
     FILTER_ARTICLE = auto()
-    SPLIT_WORD = auto()
     BASELINE_END = auto()
     WORD_BATCH = auto()
     HEARTBEAT = auto()
