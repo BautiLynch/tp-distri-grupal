@@ -11,7 +11,7 @@ services:
         condition: service_healthy
         required: true
     environment:
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "0"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
@@ -34,7 +34,7 @@ services:
         condition: service_healthy
         required: true
     environment:
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "1"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
@@ -57,7 +57,7 @@ services:
         condition: service_healthy
         required: true
     environment:
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "2"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
@@ -83,7 +83,7 @@ services:
       AVERAGE_PREFIX: average
       FILTER_AVERAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "0"
       INPUT_EXCHANGE: average
       MOM_HOST: rabbitmq
@@ -108,7 +108,7 @@ services:
       AVERAGE_PREFIX: average
       FILTER_AVERAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "1"
       INPUT_EXCHANGE: average
       MOM_HOST: rabbitmq
@@ -133,7 +133,7 @@ services:
       AVERAGE_PREFIX: average
       FILTER_AVERAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "2"
       INPUT_EXCHANGE: average
       MOM_HOST: rabbitmq
@@ -251,7 +251,7 @@ services:
         condition: service_healthy
         required: true
     environment:
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "0"
       IMAGE_GETTER_AMOUNT: "1"
       IMAGE_GETTER_PREFIX: image_getter
@@ -272,7 +272,7 @@ services:
         condition: service_healthy
         required: true
     environment:
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "1"
       IMAGE_GETTER_AMOUNT: "1"
       IMAGE_GETTER_PREFIX: image_getter
@@ -293,7 +293,7 @@ services:
         condition: service_healthy
         required: true
     environment:
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "2"
       IMAGE_GETTER_AMOUNT: "1"
       IMAGE_GETTER_PREFIX: image_getter
@@ -316,7 +316,7 @@ services:
     environment:
       AVERAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "0"
       INPUT_EXCHANGE: filter_average
       MOM_HOST: rabbitmq
@@ -340,7 +340,7 @@ services:
     environment:
       AVERAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "1"
       INPUT_EXCHANGE: filter_average
       MOM_HOST: rabbitmq
@@ -364,7 +364,7 @@ services:
     environment:
       AVERAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "2"
       INPUT_EXCHANGE: filter_average
       MOM_HOST: rabbitmq
@@ -386,7 +386,7 @@ services:
         condition: service_healthy
         required: true
     environment:
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "0"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
@@ -408,7 +408,7 @@ services:
         condition: service_healthy
         required: true
     environment:
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "1"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
@@ -430,7 +430,7 @@ services:
         condition: service_healthy
         required: true
     environment:
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "2"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
@@ -456,7 +456,7 @@ services:
       AVERAGE_EXCHANGE: average
       FILTER_AVERAGE_AMOUNT: "3"
       FILTER_AVERAGE_EXCHANGE: filter_average
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "0"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
@@ -482,7 +482,7 @@ services:
       AVERAGE_EXCHANGE: average
       FILTER_AVERAGE_AMOUNT: "3"
       FILTER_AVERAGE_EXCHANGE: filter_average
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "1"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
@@ -508,7 +508,7 @@ services:
       AVERAGE_EXCHANGE: average
       FILTER_AVERAGE_AMOUNT: "3"
       FILTER_AVERAGE_EXCHANGE: filter_average
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "2"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
@@ -650,7 +650,7 @@ services:
         required: true
     environment:
       FILTER_YEAR_PLUS_AMOUNT: "3"
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "0"
       IMAGE_TIMEOUT: "10"
       INPUT_EXCHANGE: image_getter
@@ -668,7 +668,7 @@ services:
         required: true
     environment:
       AGGREGATION_AMOUNT: "3"
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       INPUT_QUEUE: join_queue
       MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: results
@@ -768,7 +768,7 @@ services:
       AGGREGATION_AMOUNT: "3"
       FILTER_LANGUAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "0"
       INPUT_EXCHANGE: splitter
       MOM_HOST: rabbitmq
@@ -787,7 +787,7 @@ services:
       AGGREGATION_AMOUNT: "3"
       FILTER_LANGUAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "1"
       INPUT_EXCHANGE: splitter
       MOM_HOST: rabbitmq
@@ -806,7 +806,7 @@ services:
       AGGREGATION_AMOUNT: "3"
       FILTER_LANGUAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
-      HEARTBEAT_EXCHANGE: heartbeat
+      HEARTBEAT_QUEUE: heartbeat
       ID: "2"
       INPUT_EXCHANGE: splitter
       MOM_HOST: rabbitmq

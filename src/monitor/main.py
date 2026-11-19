@@ -11,7 +11,7 @@ from common.message_protocol.internal import deserialize_msg, MsgType
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
-INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
+INPUT_QUEUE = os.environ["INPUT_QUEUE"]
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 HEARTBEAT_ALLOWED_MISSES = int(os.environ.get("HEARTBEAT_ALLOWED_MISSES", 3))
 
@@ -40,9 +40,8 @@ class Monitor:
             name="heartbeat-watchdog",
         )
 
-        self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, ["heartbeat"], consume=True,
-            queue_name=f"monitor_{ID}",
+        self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
+            MOM_HOST, INPUT_QUEUE
         )
 
     def _watch_heartbeats(self):

@@ -9,7 +9,7 @@ from common.message_protocol.internal import deserialize_msg, serialize_msg, Msg
 from common.message_protocol.queries import QueryId
 
 MOM_HOST = os.environ["MOM_HOST"]
-HEARTBEAT_EXCHANGE = os.environ["HEARTBEAT_EXCHANGE"]
+HEARTBEAT_QUEUE = os.environ["HEARTBEAT_QUEUE"]
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 INPUT_QUEUE = os.environ["INPUT_QUEUE"]
 OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
@@ -21,7 +21,7 @@ class JoinFilter:
     def __init__(self):
         # El nombre es el del servicio en el compose: el monitor lo usa para reiniciarlo.
         self.heartbeat = HeartbeatSender(
-            MOM_HOST, HEARTBEAT_EXCHANGE, 0, "join", HEARTBEAT_INTERVAL
+            MOM_HOST, HEARTBEAT_QUEUE, 0, "join", HEARTBEAT_INTERVAL
         )
         self.shutdown = GracefulShutdown()
         self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(

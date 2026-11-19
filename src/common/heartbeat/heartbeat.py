@@ -8,15 +8,10 @@ HEARTBEAT_ROUTING_KEY = "heartbeat"
 
 
 class HeartbeatSender:
-    """Hilo que manda heartbeats al monitor hasta que se llama a stop().
 
-    La conexion a RabbitMQ se crea, usa y cierra dentro del propio hilo
-    porque pika no es thread-safe.
-    """
-
-    def __init__(self, host, exchange, worker_id, worker_name, interval):
+    def __init__(self, host, queue_name, worker_id, worker_name, interval):
         self.host = host
-        self.exchange = exchange
+        self.queue_name = queue_name
         self.worker_id = int(worker_id)
         self.worker_name = worker_name
         self.interval = interval
@@ -27,29 +22,31 @@ class HeartbeatSender:
         self._thread.start()
 
     def stop(self, timeout=None):
-        """Frena el hilo y espera a que cierre su conexion."""
         self._stop.set()
         if self._thread.is_alive() and self._thread is not threading.current_thread():
             self._thread.join(timeout)
 
     def _run(self):
-        exchange = None
+        queue = None
+
         try:
-            exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-                self.host, self.exchange, [HEARTBEAT_ROUTING_KEY], consume=False
+            queue = middleware.MessageMiddlewareExchangeRabbitMQ(
+                self.host, self.queue_name
             )
             message = serialize_msg(MsgType.HEARTBEAT, self.worker_id, self.worker_name)
-            # wait() devuelve True apenas se pide stop, sin esperar el intervalo completo.
+
             while not self._stop.is_set():
-                exchange.send_to(message, routing_key=HEARTBEAT_ROUTING_KEY)
+                queue.send_to(message, routing_key=HEARTBEAT_ROUTING_KEY)
                 self._stop.wait(self.interval)
+
         except Exception:
-            # Si no podemos mandar heartbeats el monitor nos va a reiniciar.
             logging.exception("Heartbeat thread failed")
+
         finally:
-            if exchange is not None:
+            if queue is not None:
                 try:
-                    exchange.close()
+                    queue.close()
                 except Exception as e:
                     logging.error(f"Error closing heartbeat middleware: {e}")
+
             logging.info("Heartbeat thread stopped")

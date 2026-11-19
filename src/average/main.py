@@ -9,7 +9,7 @@ from common.message_protocol.internal import deserialize_msg, serialize_msg, Msg
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
-HEARTBEAT_EXCHANGE = os.environ["HEARTBEAT_EXCHANGE"]
+HEARTBEAT_QUEUE = os.environ["HEARTBEAT_QUEUE"]
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 AVERAGE_PREFIX = os.environ["AVERAGE_PREFIX"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
@@ -26,7 +26,7 @@ class Average:
     def __init__(self):
         # El nombre es el del servicio en el compose: el monitor lo usa para reiniciarlo.
         self.heartbeat = HeartbeatSender(
-            MOM_HOST, HEARTBEAT_EXCHANGE, ID, f"average_{ID}", HEARTBEAT_INTERVAL
+            MOM_HOST, HEARTBEAT_QUEUE, ID, f"average_{ID}", HEARTBEAT_INTERVAL
         )
         self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
