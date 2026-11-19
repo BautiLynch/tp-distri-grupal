@@ -1,4 +1,5 @@
 import os
+import socket
 import logging
 
 from common import middleware, hashing
@@ -23,9 +24,8 @@ if not (AGGREGATION_AMOUNT == FILTER_LANGUAGE_AMOUNT >= 1) or FILTER_YEAR_AMOUNT
 
 class Splitter:
     def __init__(self):
-        # El nombre es el del servicio en el compose: el monitor lo usa para reiniciarlo.
         self.heartbeat = HeartbeatSender(
-            MOM_HOST, HEARTBEAT_QUEUE, ID, f"splitter_{ID}", HEARTBEAT_INTERVAL
+            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"splitter_{ID}", HEARTBEAT_INTERVAL
         )
         self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
@@ -82,7 +82,8 @@ class Splitter:
 
     def process_message(self, message, ack, nack):
         try:
-            message_type, client_id, fields = deserialize_msg(message)
+            message_type, fields = deserialize_msg(message)
+            client_id, *fields = fields
             if message_type == MsgType.SPLITTER_ARTICLE:
                 self._split_and_send(client_id, fields)
 

@@ -17,17 +17,6 @@ HEARTBEAT_ALLOWED_MISSES = int(os.environ.get("HEARTBEAT_ALLOWED_MISSES", 3))
 
 client = docker.from_env()
 
-# Docker Compose etiqueta cada contenedor con su proyecto y su servicio.
-# El proyecto se toma del propio monitor, para no tocar contenedores de otros despliegues.
-PROJECT = client.containers.get(socket.gethostname()).labels["com.docker.compose.project"]
-
-
-def find_containers(service):
-    return client.containers.list(all=True, filters={"label": [
-        f"com.docker.compose.project={PROJECT}",
-        f"com.docker.compose.service={service}",
-    ]})
-
 class Monitor:
     def __init__(self):
         # TODO: Hilo para heartbeat de monitores y eleccion de lider
@@ -46,67 +35,64 @@ class Monitor:
 
     def _watch_heartbeats(self):
         while True:
+            if self.stopping:
+                return
+            
             with self.condition:
-                if self.stopping:
-                    return
 
                 if not self.heartbeats:
                     self.condition.wait()
                     continue
 
-                worker = min(
+                container = min(
                     self.heartbeats,
                     key=self.heartbeats.get,
                 )
 
                 remaining = (
-                    self.heartbeats[worker] - time.monotonic()
+                    self.heartbeats[container] - time.monotonic()
                 )
 
                 if remaining > 0:
                     self.condition.wait(timeout=remaining)
                     continue
 
-                del self.heartbeats[worker]
-
             threading.Thread(
                 target=self._heartbeat_exceeded,
-                args=(worker,),
-                name=f"heartbeat-exceeded-{worker}",
+                args=(container,),
+                name=f"heartbeat-exceeded-{container}",
             ).start()
 
-    def _heartbeat_exceeded(self, worker):
-        logging.info(f"{worker} heartbeat exceeded")
+    def _heartbeat_exceeded(self, container):
+        logging.info(f"{container} heartbeat exceeded")
 
         try:
-            containers = find_containers(worker)
-            if not containers:
-                logging.error(f"No container found for {worker}")
-                return
+            logging.info(f"Restarting container {container}")
+            client.containers.get(container).restart()
 
-            for container in containers:
-                logging.info(f"Restarting {worker} (container {container.name})")
-                container.restart()
+            with self.condition:
+                del self.heartbeats[container]
+
         except APIError as e:
-            logging.error(f"Error restarting {worker}: {e}")
+            logging.error(f"Error restarting {container}: {e}")
         except Exception as e:
-            logging.error(f"Unexpected error while restarting {worker}: {e}")
+            logging.error(f"Unexpected error while restarting {container}: {e}")
 
     def process_heartbeat(self, message, ack, nack):
         try:
-            message_type, _, fields = deserialize_msg(message)
+            message_type, fields = deserialize_msg(message)
 
             if message_type != MsgType.HEARTBEAT:
                 logging.warning(f"Received non-heartbeat message: {message_type}")
                 nack()
                 return
             
-            worker, = fields
+            container_id, worker_name = fields
 
-            logging.info(f"Received heartbeat from {worker}")
+            logging.info(f"Received heartbeat from {worker_name} (container {container_id})")
 
             with self.condition:
-                self.heartbeats[worker] = (
+                self.heartbeats[container_id] = (
                     time.monotonic() + HEARTBEAT_INTERVAL * HEARTBEAT_ALLOWED_MISSES
                 )
                 self.condition.notify()
@@ -124,11 +110,11 @@ class Monitor:
             self.condition.notify()
 
         self.watchdog.join()
-        self.input_exchange.close()
+        self.input_queue.close()
 
     def start(self):
         self.watchdog.start()
-        self.input_exchange.start_consuming(self.process_heartbeat)
+        self.input_queue.start_consuming(self.process_heartbeat)
 
 
 def main():

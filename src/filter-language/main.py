@@ -1,4 +1,5 @@
 import os
+import socket
 import logging
 
 from common import middleware
@@ -20,9 +21,8 @@ SPLITTER_AMOUNT = int(os.environ["SPLITTER_AMOUNT"])
 class FilterLanguage:
 
     def __init__(self):
-        # El nombre es el del servicio en el compose: el monitor lo usa para reiniciarlo.
         self.heartbeat = HeartbeatSender(
-            MOM_HOST, HEARTBEAT_QUEUE, ID, f"filter_language_{ID}", HEARTBEAT_INTERVAL
+            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"filter_language_{ID}", HEARTBEAT_INTERVAL
         )
         self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
@@ -37,7 +37,8 @@ class FilterLanguage:
         self.words_by_client = {}
 
     def process_message(self, message, ack, nack):
-        message_type, client_id, fields = deserialize_msg(message)
+        message_type, fields = deserialize_msg(message)
+        client_id, *fields = fields
         if message_type == MsgType.WORD_BATCH:
             language, words = fields
             word_sent = self.words_by_client.setdefault(client_id, {})

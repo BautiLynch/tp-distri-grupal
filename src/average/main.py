@@ -1,5 +1,6 @@
 from datetime import datetime
 import os
+import socket
 import logging
 
 from common import middleware, storage, hashing
@@ -24,9 +25,8 @@ STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
 class Average:
 
     def __init__(self):
-        # El nombre es el del servicio en el compose: el monitor lo usa para reiniciarlo.
         self.heartbeat = HeartbeatSender(
-            MOM_HOST, HEARTBEAT_QUEUE, ID, f"average_{ID}", HEARTBEAT_INTERVAL
+            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"average_{ID}", HEARTBEAT_INTERVAL
         )
         self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
@@ -62,7 +62,8 @@ class Average:
         self.urls_by_client.pop(client_id, None)
 
     def process_message(self, message, ack, nack):
-        message_type, client_id, fields = deserialize_msg(message)
+        message_type, fields = deserialize_msg(message)
+        client_id, *fields = fields
         if message_type == MsgType.WORD_YEAR_AMOUNT:
             url, date_modified, amount = fields
             urls = self.urls_by_client.setdefault(client_id, {})

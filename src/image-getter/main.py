@@ -1,4 +1,5 @@
 import os
+import socket
 import logging
 import urllib.request
 
@@ -21,9 +22,8 @@ IMAGE_USER_AGENT = os.environ.get("IMAGE_USER_AGENT", "tp-distribuidos")
 
 class ImageGetter:
     def __init__(self):
-        # El nombre es el del servicio en el compose: el monitor lo usa para reiniciarlo.
         self.heartbeat = HeartbeatSender(
-            MOM_HOST, HEARTBEAT_QUEUE, ID, f"image_getter_{ID}", HEARTBEAT_INTERVAL
+            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"image_getter_{ID}", HEARTBEAT_INTERVAL
         )
         self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
@@ -45,7 +45,8 @@ class ImageGetter:
             self.output_exchange.send_to(serialize_msg(MsgType.RESULT, client_id, QueryId.Q2, name, url, response.read()), routing_key=client_id)
 
     def process_message(self, message, ack, nack):
-        message_type, client_id, fields = deserialize_msg(message)
+        message_type, fields = deserialize_msg(message)
+        client_id, *fields = fields
         if message_type == MsgType.GET_IMAGE:
             url, name, image_url = fields
             try:

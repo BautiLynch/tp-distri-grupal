@@ -9,10 +9,10 @@ HEARTBEAT_ROUTING_KEY = "heartbeat"
 
 class HeartbeatSender:
 
-    def __init__(self, host, queue_name, worker_id, worker_name, interval):
+    def __init__(self, host, queue_name, container_id, worker_name, interval):
         self.host = host
         self.queue_name = queue_name
-        self.worker_id = int(worker_id)
+        self.container_id = container_id
         self.worker_name = worker_name
         self.interval = interval
         self._stop = threading.Event()
@@ -30,13 +30,13 @@ class HeartbeatSender:
         queue = None
 
         try:
-            queue = middleware.MessageMiddlewareExchangeRabbitMQ(
+            queue = middleware.MessageMiddlewareQueueRabbitMQ(
                 self.host, self.queue_name
             )
-            message = serialize_msg(MsgType.HEARTBEAT, self.worker_id, self.worker_name)
+            message = serialize_msg(MsgType.HEARTBEAT, self.container_id, self.worker_name)
 
             while not self._stop.is_set():
-                queue.send_to(message, routing_key=HEARTBEAT_ROUTING_KEY)
+                queue.send(message, routing_key=HEARTBEAT_ROUTING_KEY)
                 self._stop.wait(self.interval)
 
         except Exception:

@@ -1,4 +1,5 @@
 import os
+import socket
 import logging
 
 from common import middleware
@@ -19,9 +20,8 @@ TOP_SIZE = int(os.environ["TOP_SIZE"])
 class JoinFilter:
 
     def __init__(self):
-        # El nombre es el del servicio en el compose: el monitor lo usa para reiniciarlo.
         self.heartbeat = HeartbeatSender(
-            MOM_HOST, HEARTBEAT_QUEUE, 0, "join", HEARTBEAT_INTERVAL
+            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), "join", HEARTBEAT_INTERVAL
         )
         self.shutdown = GracefulShutdown()
         self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
@@ -68,7 +68,8 @@ class JoinFilter:
         self.top_by_client.pop(client_id, None)
 
     def process_message(self, message, ack, nack):
-        message_type, client_id, fields = deserialize_msg(message)
+        message_type, fields = deserialize_msg(message)
+        client_id, *fields = fields
         if message_type == MsgType.PARTIAL_TOP:
             self._process_data(client_id, *fields)
             self._all_tops_recieved(client_id)

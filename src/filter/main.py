@@ -1,5 +1,6 @@
 import os
 import logging
+import socket
 
 from datetime import datetime
 from common import middleware, hashing
@@ -25,9 +26,8 @@ YEAR = int(os.environ["YEAR"])
 class FilterYearPlus:
     def __init__(self):
 
-        # Nombre del servicio en el compose: el monitor lo usa para identificar y reiniciar al worker.
         self.heartbeat = HeartbeatSender(
-            MOM_HOST, HEARTBEAT_QUEUE, ID, f"filter_{ID}", HEARTBEAT_INTERVAL
+            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"filter_{ID}", HEARTBEAT_INTERVAL
         )
 
         self.shutdown = GracefulShutdown()
@@ -45,7 +45,8 @@ class FilterYearPlus:
 
     def process_message(self, message, ack, nack):
         try:
-            message_type, client_id, fields = deserialize_msg(message)
+            message_type, fields = deserialize_msg(message)
+            client_id, *fields = fields
             if message_type == MsgType.FILTER_ARTICLE:
                 name, url, language, date_modified, image_url, sections = fields
 

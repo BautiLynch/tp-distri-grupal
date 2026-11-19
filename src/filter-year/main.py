@@ -1,4 +1,5 @@
 import os
+import socket
 import logging
 
 from datetime import datetime
@@ -24,9 +25,8 @@ YEAR = int(os.environ.get("YEAR"))
 class FilterYear:
 
     def __init__(self):
-        # El nombre es el del servicio en el compose: el monitor lo usa para reiniciarlo.
         self.heartbeat = HeartbeatSender(
-            MOM_HOST, HEARTBEAT_QUEUE, ID, f"filter_year_{ID}", HEARTBEAT_INTERVAL
+            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"filter_year_{ID}", HEARTBEAT_INTERVAL
         )
         self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
@@ -42,7 +42,8 @@ class FilterYear:
         self.eof_by_client = {}
 
     def process_message(self, message, ack, nack):
-        message_type, client_id, fields = deserialize_msg(message)
+        message_type, fields = deserialize_msg(message)
+        client_id, *fields = fields
         if message_type == MsgType.WORD_YEAR_AMOUNT:
             url, date_modified, amount = fields
             

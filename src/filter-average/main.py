@@ -1,5 +1,6 @@
 from datetime import datetime
 import os
+import socket
 import logging
 
 from common import middleware
@@ -24,9 +25,8 @@ YEAR = int(os.environ["YEAR"])
 class FilterAverage:
 
     def __init__(self):
-        # El nombre es el del servicio en el compose: el monitor lo usa para reiniciarlo.
         self.heartbeat = HeartbeatSender(
-            MOM_HOST, HEARTBEAT_QUEUE, ID, f"filter_average_{ID}", HEARTBEAT_INTERVAL
+            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"filter_average_{ID}", HEARTBEAT_INTERVAL
         )
         self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
@@ -77,7 +77,8 @@ class FilterAverage:
             self.output_exchange.send_to(serialize_msg(MsgType.RESULT, client_id, QueryId.Q5, url, amount_words), routing_key=client_id)
 
     def process_message(self, message, ack, nack):
-        message_type, client_id, fields = deserialize_msg(message)
+        message_type, fields = deserialize_msg(message)
+        client_id, *fields = fields
         if message_type == MsgType.WORD_YEAR_AMOUNT:
             url, date_modified, amount = fields
 

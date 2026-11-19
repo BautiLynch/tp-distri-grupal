@@ -683,48 +683,10 @@ services:
         condition: service_healthy
         required: true
     environment:
-      HEARTBEAT_ALLOWED_MISSES: "3"
-      HEARTBEAT_INTERVAL: "5"
       ID: "0"
-      INPUT_EXCHANGE: heartbeat
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
-    volumes:
-      - source: /var/run/docker.sock
-        target: /var/run/docker.sock
-        type: bind
-  monitor_1:
-    build:
-      context: ./src
-      dockerfile: monitor/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-        required: true
-    environment:
       HEARTBEAT_ALLOWED_MISSES: "3"
       HEARTBEAT_INTERVAL: "5"
-      ID: "1"
-      INPUT_EXCHANGE: heartbeat
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
-    volumes:
-      - source: /var/run/docker.sock
-        target: /var/run/docker.sock
-        type: bind
-  monitor_2:
-    build:
-      context: ./src
-      dockerfile: monitor/Dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-        required: true
-    environment:
-      HEARTBEAT_ALLOWED_MISSES: "3"
-      HEARTBEAT_INTERVAL: "5"
-      ID: "2"
-      INPUT_EXCHANGE: heartbeat
+      INPUT_QUEUE: heartbeat
       MOM_HOST: rabbitmq
       PYTHONUNBUFFERED: "1"
     volumes:
