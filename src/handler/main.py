@@ -38,6 +38,7 @@ class ClientHandler:
             "q5": 0,
         }
         self.completed_queries = set()
+        self.q1_message_ids = set()
         self.finished = False
         self.stopping = False
 
@@ -67,6 +68,17 @@ class ClientHandler:
             message_type, _, fields = (
                 deserialize_msg(message)
             )
+            # TODO: Unificar la lectura y deduplicación de IDs para todas las queries.
+            message_id = None
+            if message_type == InternalMsgType.Q1_RESULT and len(fields) == 3:
+                *fields, message_id = fields
+            elif message_type == InternalMsgType.QUERY_END and len(fields) == 2 and fields[0] == InternalMsgType.Q1_RESULT:
+                *fields, message_id = fields
+
+            if message_id in self.q1_message_ids:
+                ack()
+                return
+
             if message_type == InternalMsgType.QUERY_END:
                 query_id, = fields
                 query_name = f"q{query_id}"
@@ -93,6 +105,8 @@ class ClientHandler:
         except Exception:
             nack()
             raise
+        if message_id is not None:
+            self.q1_message_ids.add(message_id)
         ack()
         if self.finished:
             self.input_exchange.stop_consuming()

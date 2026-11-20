@@ -3,6 +3,7 @@ import multiprocessing
 import os
 import signal
 import socket
+from uuid import uuid4
 
 from common import middleware, message_protocol
 
@@ -52,7 +53,7 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
                 filtered_article, splitter_article = preprocess_article(parse_article(article))
                 filtered = message_protocol.internal.serialize_msg(
                     message_protocol.internal.MsgType.FILTER_ARTICLE,
-                    client_id, *filtered_article,
+                    client_id, *filtered_article, uuid4().bytes,
                 )
                 filter_exchange.send_to(filtered, str(article_index % FILTER_AMOUNT))
                 if splitter_article is not None:
@@ -67,7 +68,12 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
                     message_protocol.internal.MsgType.END_OF_RECORDS,
                     client_id,
                 )
-                filter_exchange.send(end_of_records)
+                # TODO: Unificar el EOF cuando el splitter también reciba IDs.
+                filter_end = message_protocol.internal.serialize_msg(
+                    message_protocol.internal.MsgType.END_OF_RECORDS,
+                    client_id, uuid4().bytes,
+                )
+                filter_exchange.send(filter_end)
                 splitter_exchange.send(end_of_records)
                     
             if message_type == message_protocol.external.MsgType.END_OF_RECORDS:

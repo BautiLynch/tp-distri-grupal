@@ -4,6 +4,7 @@ import logging
 
 from common import middleware, hashing
 from common.shutdown import GracefulShutdown
+from common.storage.wal import WriteAheadLog
 from common.message_protocol.internal import deserialize_msg, MsgType, serialize_msg
 
 ID = os.environ["ID"]
@@ -32,16 +33,36 @@ class FilterYearPlus:
         )
 
         self.sections = {section.lower() for section in SECTIONS}
+        self.wal = WriteAheadLog(f"storage/filter_{ID}.wal")
+
+    def _recover_q1(self):
+        pending = self.wal.load()
+        if pending is None:
+            return
+        try:
+            _, client_id, _ = deserialize_msg(pending)
+        except ValueError:
+            logging.warning("Discarding unreadable Q1 WAL")
+            self.wal.discard()
+            return
+        self.output_exchange.send_to(pending, routing_key=client_id)
+        self.wal.mark_sent()
+
+    def _send_q1(self, message_type, client_id, *fields):
+        result = serialize_msg(message_type, client_id, *fields)
+        self.wal.save(result)
+        self.output_exchange.send_to(result, routing_key=client_id)
+        self.wal.mark_sent()
 
     def process_message(self, message, ack, nack):
         try:
             message_type, client_id, fields = deserialize_msg(message)
             if message_type == MsgType.FILTER_ARTICLE:
-                name, url, language, date_modified, image_url, sections = fields
+                name, url, language, date_modified, image_url, sections, *message_id = fields
 
                 if datetime.fromisoformat(date_modified.replace("Z", "+00:00")).year <= YEAR:
                     if language.lower() == LANGUAGE.lower():
-                        self.output_exchange.send_to(serialize_msg(MsgType.Q1_RESULT, client_id, url, date_modified), routing_key=client_id)
+                        self._send_q1(MsgType.Q1_RESULT, client_id, url, date_modified, *message_id)
 
                     if self.sections.intersection(section.lower() for section in sections):
                         key = hashing.get_hash_key(f"{client_id}_{url}", IMAGE_GETTER_AMOUNT)
@@ -49,11 +70,11 @@ class FilterYearPlus:
                             serialize_msg(MsgType.GET_IMAGE, client_id, url, name, image_url),
                             routing_key=key,
                         )
-            
-            elif message_type == MsgType.END_OF_RECORDS:
-                self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q1_RESULT), routing_key=client_id)
-                self.output_exchange_image.send(serialize_msg(MsgType.END_OF_RECORDS, client_id))
 
+            elif message_type == MsgType.END_OF_RECORDS:
+                end_id = (fields[0] + ID.encode("ascii"),) if fields else ()
+                self._send_q1(MsgType.QUERY_END, client_id, MsgType.Q1_RESULT, *end_id)
+                self.output_exchange_image.send(serialize_msg(MsgType.END_OF_RECORDS, client_id))
         except Exception:
             logging.exception("Error processing message")
             nack()
@@ -62,13 +83,18 @@ class FilterYearPlus:
         ack()
 
     def close(self):
-        for mom in [self.input_exchange, self.output_exchange, self.output_exchange_image]:
+        for resource in (self.input_exchange, self.output_exchange, self.output_exchange_image, self.wal):
             try:
-                mom.close()
-            except Exception as e:
-                logging.error(f"Error closing message middleware: {e}")
+                resource.close()
+            except Exception:
+                logging.exception("Error closing filter resource")
 
     def start(self):
+        try:
+            self._recover_q1()
+        except Exception:
+            self.close()
+            raise
         self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 
