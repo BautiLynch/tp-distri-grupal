@@ -146,6 +146,25 @@ services:
         target: /storage
         type: volume
         volume: {}
+  chaos_monkey:
+    build:
+      context: ./src
+      dockerfile: chaos-monkey/Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+        required: true
+    environment:
+      CHAOS_INTERVAL: "15"
+      CHAOS_KILLS_PER_ROUND: "1"
+      CHAOS_START_DELAY: "10"
+      CHAOS_TARGETS: filter,filter_language,filter_year,filter_average,image_getter,splitter,aggregation,average,join
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        type: bind
   client_0:
     build:
       context: ./src
@@ -590,12 +609,6 @@ services:
         condition: service_started
         required: true
       monitor_0:
-        condition: service_started
-        required: true
-      monitor_1:
-        condition: service_started
-        required: true
-      monitor_2:
         condition: service_started
         required: true
       rabbitmq:

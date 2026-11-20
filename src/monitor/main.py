@@ -22,6 +22,7 @@ class Monitor:
         # TODO: Hilo para heartbeat de monitores y eleccion de lider
     
         self.heartbeats = {}
+        self.worker_names = {}
         self.stopping = False
         self.condition = threading.Condition()
         self.watchdog = threading.Thread(
@@ -57,26 +58,35 @@ class Monitor:
                     self.condition.wait(timeout=remaining)
                     continue
 
+                del self.heartbeats[container]
+                worker_name = self.worker_names.get(container, container)
+
             threading.Thread(
                 target=self._heartbeat_exceeded,
-                args=(container,),
-                name=f"heartbeat-exceeded-{container}",
+                args=(container, worker_name),
+                name=f"heartbeat-exceeded-{worker_name}",
             ).start()
 
-    def _heartbeat_exceeded(self, container):
-        logging.info(f"{container} heartbeat exceeded")
+    def _heartbeat_exceeded(self, container, worker_name):
+        logging.info(f"{worker_name} heartbeat exceeded")
 
         try:
-            logging.info(f"Restarting container {container}")
+            logging.info(f"Restarting {worker_name} (container {container})")
             client.containers.get(container).restart()
-
-            with self.condition:
-                del self.heartbeats[container]
+            return
 
         except APIError as e:
-            logging.error(f"Error restarting {container}: {e}")
+            logging.error(f"Error restarting {worker_name} (container {container}): {e}")
         except Exception as e:
-            logging.error(f"Unexpected error while restarting {container}: {e}")
+            logging.error(
+                f"Unexpected error while restarting {worker_name} (container {container}): {e}"
+            )
+        with self.condition:
+            self.heartbeats.setdefault(
+                container,
+                time.monotonic() + HEARTBEAT_INTERVAL * HEARTBEAT_ALLOWED_MISSES,
+            )
+            self.condition.notify()
 
     def process_heartbeat(self, message, ack, nack):
         try:
@@ -92,6 +102,7 @@ class Monitor:
             logging.info(f"Received heartbeat from {worker_name} (container {container_id})")
 
             with self.condition:
+                self.worker_names[container_id] = worker_name
                 self.heartbeats[container_id] = (
                     time.monotonic() + HEARTBEAT_INTERVAL * HEARTBEAT_ALLOWED_MISSES
                 )
