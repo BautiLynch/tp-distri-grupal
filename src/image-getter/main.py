@@ -4,7 +4,9 @@ import urllib.request
 
 from common import middleware
 from common.shutdown import GracefulShutdown
-from common.message_protocol.internal import deserialize_msg, MsgType, serialize_msg
+from common.storage.eof_counter import EofCounter
+from common.storage.message_publisher import MessagePublisher
+from common.message_protocol.internal import deserialize_msg, MsgType
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
@@ -25,23 +27,23 @@ class ImageGetter:
             MOM_HOST, OUTPUT_EXCHANGE, [], consume=False
         )
 
-        self.eof_by_client = {}
+        self.results = MessagePublisher(self.output_exchange, f"storage/image_getter_{ID}.wal")
+        self.eofs = EofCounter(f"storage/image_getter_{ID}_eofs", FILTER_YEAR_PLUS_AMOUNT)
 
-    def _get_image(self, client_id, name, url, image_url):
+    def _get_image(self, image_url):
         if not image_url:
-            self.output_exchange.send_to(serialize_msg(MsgType.Q2_RESULT, client_id, name, url, b""), routing_key=client_id)
-            return
+            return b""
 
         request = urllib.request.Request(image_url, headers={"User-Agent": IMAGE_USER_AGENT})
         with urllib.request.urlopen(request, timeout=IMAGE_TIMEOUT) as response:
-            self.output_exchange.send_to(serialize_msg(MsgType.Q2_RESULT, client_id, name, url, response.read()), routing_key=client_id)
+            return response.read()
 
     def process_message(self, message, ack, nack):
         message_type, client_id, fields = deserialize_msg(message)
         if message_type == MsgType.GET_IMAGE:
             url, name, image_url = fields
             try:
-                self._get_image(client_id, name, url, image_url)
+                image = self._get_image(image_url)
             except Exception as error:
                 status_code = getattr(error, "code", None)
                 logging.debug(
@@ -52,32 +54,42 @@ class ImageGetter:
                 if status_code == 403:
                     nack()
                     return
-                else:
-                    self.output_exchange.send_to(serialize_msg(MsgType.Q2_RESULT, client_id, name, url, b""), routing_key=client_id)
+                image = b""
+            self.results.send(MsgType.Q2_RESULT, client_id, name, url, image)
 
         elif message_type == MsgType.END_OF_RECORDS:
-            self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
-            if self.eof_by_client[client_id] == FILTER_YEAR_PLUS_AMOUNT:
-                self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q2_RESULT), routing_key=client_id)
-                self._release_client(client_id)
+            count = self.eofs.get(client_id) + 1
+            if count == FILTER_YEAR_PLUS_AMOUNT:
+                self.results.send(MsgType.QUERY_END, client_id, MsgType.Q2_RESULT)
+                self.eofs.clear(client_id)
+            else:
+                self.eofs.save(client_id, count)
 
         else:
             nack()
             return
         ack()
 
-    def _release_client(self, client_id):
-        self.eof_by_client.pop(client_id, None)
-
     def close(self):
-        for mom in [self.input_exchange, self.output_exchange]:
+        for resource in (self.input_exchange, self.output_exchange, self.results, self.eofs):
             try:
-                mom.close()
-            except Exception as e:
-                logging.error(f"Error closing message middleware: {e}")
+                resource.close()
+            except Exception:
+                logging.exception("Error closing image getter resource")
 
     def start(self):
+        try:
+            self.eofs.recover()
+            recovered = self.results.recover()
+            if recovered is not None:
+                message_type, client_id = recovered
+                if message_type == MsgType.QUERY_END:
+                    self.eofs.clear(client_id)
+        except Exception:
+            self.close()
+            raise
         self.shutdown.run(self.input_exchange, self.process_message, self.close)
+
 
 def main():
     logging.basicConfig(

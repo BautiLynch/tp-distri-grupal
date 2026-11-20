@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 PENDING = b"\x00"
-SENT = b"\x01"
+PROCESSED = b"\x01"
 
 
 class WriteAheadLog:
@@ -12,6 +12,7 @@ class WriteAheadLog:
         path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
         self.file = os.fdopen(fd, "r+b")
+        self.path = path
 
     def _sync(self):
         self.file.flush()
@@ -27,19 +28,23 @@ class WriteAheadLog:
 
     def load(self):
         self.file.seek(0)
-        if self.file.read(1) in (b"", SENT):
+        if self.file.read(1) in (b"", PROCESSED):
             return None
         return self.file.read()
 
-    def mark_sent(self):
+    def mark_processed(self):
         self.file.seek(0)
-        if self.file.write(SENT) != len(SENT):
+        if self.file.write(PROCESSED) != len(PROCESSED):
             raise OSError("Incomplete WAL status write")
         self._sync()
 
     def discard(self):
         self.file.truncate(0)
         self._sync()
+
+    def delete(self):
+        self.close()
+        self.path.unlink(missing_ok=True)
 
     def close(self):
         self.file.close()

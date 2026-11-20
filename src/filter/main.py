@@ -4,8 +4,8 @@ import logging
 
 from common import middleware, hashing
 from common.shutdown import GracefulShutdown
-from common.storage.wal import WriteAheadLog
-from common.message_protocol.internal import deserialize_msg, MsgType, serialize_msg
+from common.storage.message_publisher import MessagePublisher
+from common.message_protocol.internal import deserialize_msg, MsgType
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
@@ -33,48 +33,34 @@ class FilterYearPlus:
         )
 
         self.sections = {section.lower() for section in SECTIONS}
-        self.wal = WriteAheadLog(f"storage/filter_{ID}.wal")
+        self.results = MessagePublisher(self.output_exchange, f"storage/filter_{ID}.wal")
+        self.images = MessagePublisher(
+            self.output_exchange_image, f"storage/filter_{ID}_images.wal",
+            get_routing_key=self._image_routing_key,
+        )
 
-    def _recover_q1(self):
-        pending = self.wal.load()
-        if pending is None:
-            return
-        try:
-            _, client_id, _ = deserialize_msg(pending)
-        except ValueError:
-            logging.warning("Discarding unreadable Q1 WAL")
-            self.wal.discard()
-            return
-        self.output_exchange.send_to(pending, routing_key=client_id)
-        self.wal.mark_sent()
-
-    def _send_q1(self, message_type, client_id, *fields):
-        result = serialize_msg(message_type, client_id, *fields)
-        self.wal.save(result)
-        self.output_exchange.send_to(result, routing_key=client_id)
-        self.wal.mark_sent()
+    def _image_routing_key(self, message_type, client_id, fields):
+        if message_type == MsgType.GET_IMAGE:
+            url = fields[0]
+            return hashing.get_hash_key(f"{client_id}_{url}", IMAGE_GETTER_AMOUNT)
+        return None
 
     def process_message(self, message, ack, nack):
         try:
             message_type, client_id, fields = deserialize_msg(message)
             if message_type == MsgType.FILTER_ARTICLE:
-                name, url, language, date_modified, image_url, sections, *message_id = fields
+                name, url, language, date_modified, image_url, sections = fields
 
                 if datetime.fromisoformat(date_modified.replace("Z", "+00:00")).year <= YEAR:
                     if language.lower() == LANGUAGE.lower():
-                        self._send_q1(MsgType.Q1_RESULT, client_id, url, date_modified, *message_id)
+                        self.results.send(MsgType.Q1_RESULT, client_id, url, date_modified)
 
                     if self.sections.intersection(section.lower() for section in sections):
-                        key = hashing.get_hash_key(f"{client_id}_{url}", IMAGE_GETTER_AMOUNT)
-                        self.output_exchange_image.send_to(
-                            serialize_msg(MsgType.GET_IMAGE, client_id, url, name, image_url),
-                            routing_key=key,
-                        )
+                        self.images.send(MsgType.GET_IMAGE, client_id, url, name, image_url)
 
             elif message_type == MsgType.END_OF_RECORDS:
-                end_id = (fields[0] + ID.encode("ascii"),) if fields else ()
-                self._send_q1(MsgType.QUERY_END, client_id, MsgType.Q1_RESULT, *end_id)
-                self.output_exchange_image.send(serialize_msg(MsgType.END_OF_RECORDS, client_id))
+                self.results.send(MsgType.QUERY_END, client_id, MsgType.Q1_RESULT)
+                self.images.send(MsgType.END_OF_RECORDS, client_id)
         except Exception:
             logging.exception("Error processing message")
             nack()
@@ -83,7 +69,7 @@ class FilterYearPlus:
         ack()
 
     def close(self):
-        for resource in (self.input_exchange, self.output_exchange, self.output_exchange_image, self.wal):
+        for resource in (self.input_exchange, self.output_exchange, self.output_exchange_image, self.results, self.images):
             try:
                 resource.close()
             except Exception:
@@ -91,7 +77,8 @@ class FilterYearPlus:
 
     def start(self):
         try:
-            self._recover_q1()
+            self.results.recover()
+            self.images.recover()
         except Exception:
             self.close()
             raise
