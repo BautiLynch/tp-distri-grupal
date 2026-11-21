@@ -6,6 +6,7 @@ import signal
 import socket
 import threading
 import time
+import sys
 
 from common.message_protocol import external
 from results import ResultWriter
@@ -15,33 +16,35 @@ LOG_EVERY = 50000
 
 
 def expect_message(connection, expected_type):
-    message_type, payload = external.recv_msg(connection)
+    message_type, fields = external.recv_msg(connection)
     if message_type != expected_type:
         raise ValueError(f"Expected message {expected_type}, got {message_type}")
-    return payload
+    return fields
 
 
 class Client:
     def __init__(self, gateway_host, gateway_port, input_path, output_dir,
-                 connection_timeout=10, q2_image_limit=0):
+                 connection_timeout=10):
         if not gateway_host or not 1 <= gateway_port <= 65535:
             raise ValueError("Invalid gateway address")
         if not math.isfinite(connection_timeout) or connection_timeout <= 0:
             raise ValueError("CONNECTION_TIMEOUT must be positive and finite")
-        if q2_image_limit < 0:
-            raise ValueError("Q2_IMAGE_LIMIT must not be negative")
         self.gateway_address = (gateway_host, gateway_port)
         self.input_path = input_path
         self.output_dir = output_dir
-        self.q2_image_limit = q2_image_limit
         self.connection_timeout = connection_timeout
         self.stopping = threading.Event()
+        self.interrupted = threading.Event()
         self.receiver_ready = threading.Event()
         self.receiver_errors = queue.SimpleQueue()
         self.connections = []
         self.connections_lock = threading.RLock()
 
-    def stop(self):
+    def stop(self, interrupted=False):
+        # interrupted=True solo desde el handler de señales: distingue una
+        # interrupción externa de un stop() interno por un error.
+        if interrupted:
+            self.interrupted.set()
         self.stopping.set()
         with self.connections_lock:
             for connection in self.connections:
@@ -94,12 +97,13 @@ class Client:
             self.receiver_ready.set()
             received_count = 0
             while True:
-                message_type, payload = external.recv_msg(connection)
+                message_type, fields = external.recv_msg(connection)
                 if message_type == external.MsgType.END_OF_RECORDS:
                     return
                 if message_type != external.MsgType.RESULT:
                     raise ValueError(f"Unexpected handler message {message_type}")
-                output.write(*payload)
+                query_id, *result = fields
+                output.write(query_id, result)
                 received_count += 1
                 if received_count % LOG_EVERY == 0:
                     logging.debug(
@@ -131,10 +135,10 @@ class Client:
     def run(self):
         receiver = None
         with open(self.input_path, "rb") as source:
-            with ResultWriter(self.output_dir, self.q2_image_limit) as output:
+            with ResultWriter(self.output_dir) as output:
                 try:
                     gateway = self._connect(self.gateway_address, attempts=3)
-                    client_id = expect_message(gateway, external.MsgType.CLIENT_ID)
+                    client_id, = expect_message(gateway, external.MsgType.CLIENT_ID)
                     handler_address = expect_message(gateway, external.MsgType.HANDLER_ADDRESS)
                     handler = self._connect(handler_address)
                     receiver = threading.Thread(
@@ -182,14 +186,13 @@ def main():
             os.environ["GATEWAY_HOST"], int(os.environ["GATEWAY_PORT"]),
             os.environ["INPUT_PATH"], os.environ["OUTPUT_DIR"],
             float(os.environ.get("CONNECTION_TIMEOUT", "10")),
-            int(os.environ.get("Q2_IMAGE_LIMIT", "10")),
         )
         for sig in (signal.SIGTERM, signal.SIGINT):
-            previous_handlers[sig] = signal.signal(sig, lambda signum, frame: client.stop())
+            previous_handlers[sig] = signal.signal(sig, lambda signum, frame: client.stop(interrupted=True))
         client.run()
         completed = True
     except Exception:
-        if client is not None and client.stopping.is_set():
+        if client is not None and client.interrupted.is_set():
             interrupted = True
             logging.info("Client interrupted by signal; exiting cleanly")
         else:
@@ -206,4 +209,4 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

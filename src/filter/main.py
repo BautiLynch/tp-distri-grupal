@@ -1,11 +1,13 @@
 from datetime import datetime
 import os
 import logging
+import sys
 
 from common import middleware, hashing
 from common.shutdown import GracefulShutdown
 from common.storage.message_publisher import MessagePublisher
 from common.message_protocol.internal import deserialize_msg, MsgType
+from common.message_protocol.queries import QueryId
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
@@ -53,13 +55,13 @@ class FilterYearPlus:
 
                 if datetime.fromisoformat(date_modified.replace("Z", "+00:00")).year <= YEAR:
                     if language.lower() == LANGUAGE.lower():
-                        self.results.send(MsgType.Q1_RESULT, client_id, url, date_modified)
+                        self.results.send(MsgType.RESULT, client_id, QueryId.Q1, url, date_modified)
 
                     if self.sections.intersection(section.lower() for section in sections):
                         self.images.send(MsgType.GET_IMAGE, client_id, url, name, image_url)
 
             elif message_type == MsgType.END_OF_RECORDS:
-                self.results.send(MsgType.QUERY_END, client_id, MsgType.Q1_RESULT)
+                self.results.send(MsgType.QUERY_END, client_id, QueryId.Q1)
                 self.images.send(MsgType.END_OF_RECORDS, client_id)
         except Exception:
             logging.exception("Error processing message")
@@ -97,4 +99,4 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

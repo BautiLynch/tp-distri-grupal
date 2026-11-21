@@ -3,6 +3,7 @@ import multiprocessing
 import os
 import signal
 import socket
+import sys
 
 from common import middleware, message_protocol
 
@@ -42,13 +43,14 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
             MOM_HOST, SPLITTER_PREFIX, [f"{index}" for index in range(SPLITTER_AMOUNT)], consume=False
         )
         while True:
-            message_type, article = message_protocol.external.recv_msg(client_socket)
+            message_type, fields = message_protocol.external.recv_msg(client_socket)
             if message_type not in (
                 message_protocol.external.MsgType.ARTICLE,
                 message_protocol.external.MsgType.END_OF_RECORDS,
             ):
                 raise ValueError("Expected an article or end of records")
             if message_type == message_protocol.external.MsgType.ARTICLE:
+                article, = fields
                 filtered_article, splitter_article = preprocess_article(parse_article(article))
                 filtered = message_protocol.internal.serialize_msg(
                     message_protocol.internal.MsgType.FILTER_ARTICLE,
@@ -153,4 +155,4 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())
