@@ -85,7 +85,7 @@ def scale_config(config, target, amount):
                 stem = re.sub(r"_\d+$", "", path.name)
                 env["OUTPUT_DIR"] = str(path.with_name(f"{stem}_{index}")).replace("\\", "/")
                 dataset = Path(env["INPUT_PATH"])
-                env["INPUT_PATH"] = str(dataset.with_name(f"{index + 1}.jsonl"))
+                env["INPUT_PATH"] = str(dataset.with_name(f"{index + 1}.jsonl")).replace("\\", "/")
             if index not in replicas[group]:
                 for volume in clone.get("volumes", []):
                     if volume["type"] == "volume":
