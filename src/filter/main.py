@@ -6,6 +6,7 @@ import sys
 from common import middleware, hashing
 from common.shutdown import GracefulShutdown
 from common.message_protocol.internal import deserialize_msg, MsgType, serialize_msg
+from common.message_protocol.queries import QueryId
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
@@ -42,7 +43,7 @@ class FilterYearPlus:
 
                 if datetime.fromisoformat(date_modified.replace("Z", "+00:00")).year <= YEAR:
                     if language.lower() == LANGUAGE.lower():
-                        self.output_exchange.send_to(serialize_msg(MsgType.Q1_RESULT, client_id, url, date_modified), routing_key=client_id)
+                        self.output_exchange.send_to(serialize_msg(MsgType.RESULT, client_id, QueryId.Q1, url, date_modified), routing_key=client_id)
 
                     if self.sections.intersection(section.lower() for section in sections):
                         key = hashing.get_hash_key(f"{client_id}_{url}", IMAGE_GETTER_AMOUNT)
@@ -52,7 +53,7 @@ class FilterYearPlus:
                         )
             
             elif message_type == MsgType.END_OF_RECORDS:
-                self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q1_RESULT), routing_key=client_id)
+                self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, QueryId.Q1), routing_key=client_id)
                 self.output_exchange_image.send(serialize_msg(MsgType.END_OF_RECORDS, client_id))
 
         except Exception:

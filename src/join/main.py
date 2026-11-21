@@ -6,6 +6,7 @@ from common import middleware
 from common.shutdown import GracefulShutdown
 from common.key_item import KeyItem
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
+from common.message_protocol.queries import QueryId
 
 MOM_HOST = os.environ["MOM_HOST"]
 INPUT_QUEUE = os.environ["INPUT_QUEUE"]
@@ -51,8 +52,8 @@ class JoinFilter:
             for item in final_top
         ]
 
-        self.output_exchange.send_to(serialize_msg(MsgType.Q4_RESULT, client_id, result), routing_key=client_id)
-        self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, MsgType.Q4_RESULT), routing_key=client_id)
+        self.output_exchange.send_to(serialize_msg(MsgType.RESULT, client_id, QueryId.Q4, result), routing_key=client_id)
+        self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, QueryId.Q4), routing_key=client_id)
 
         self._release_client(client_id)
 
@@ -62,7 +63,7 @@ class JoinFilter:
 
     def process_message(self, message, ack, nack):
         message_type, client_id, fields = deserialize_msg(message)
-        if message_type == MsgType.Q4_RESULT:
+        if message_type == MsgType.PARTIAL_TOP:
             self._process_data(client_id, *fields)
             self._all_tops_recieved(client_id)
         else:
