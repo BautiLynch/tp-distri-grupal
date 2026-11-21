@@ -1,6 +1,7 @@
 from datetime import datetime
 import os
 import logging
+import sys
 
 from common import middleware, hashing
 from common.shutdown import GracefulShutdown
@@ -85,4 +86,4 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())
