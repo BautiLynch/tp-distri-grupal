@@ -63,6 +63,7 @@ class Monitor:
                     if self.stopping:
                         return
 
+                # TODO: mandar en el gossip del lider los nuevos containers
                 message = serialize_msg(MsgType.GOSSIP, int(ID), socket.gethostname())
 
                 for index in range(MONITOR_AMOUNT):
@@ -125,7 +126,9 @@ class Monitor:
             monitor_id, container_id = fields
             logging.info("Gossip from monitor %s (container %s)", monitor_id, container_id)
 
-            # TODO: actualizar el estado del monitor y procesar mensajes de eleccion.
+            # TODO: actualizar el estado del monitor
+            # TODO: procesar mensajes de eleccion 
+            # TODO: comenzar la eleccion o levantar el monitor (segun si se cae el lider o uno cualquiera)
         except Exception:
             logging.error("Invalid gossip message")
             # No mando nack xq no quiero reintentar el ms erroreo
@@ -229,10 +232,10 @@ class Monitor:
         self.input_queue.close()
 
     def start(self):
-        # self.watchdog.start() # Solo deberia hacer start cuando soy el lider
+        # self.watchdog.start() # TODO: Solo deberia hacer start cuando soy el lider
         self.gossip_listener.start()
         self.gossip_publisher.start()
-        # self.input_queue.start_consuming(self.process_heartbeat) # Idem
+        # self.input_queue.start_consuming(self.process_heartbeat) # TODO: Idem
 
 
 def main():
