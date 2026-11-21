@@ -4,8 +4,6 @@ import threading
 from common import middleware
 from common.message_protocol.internal import MsgType, serialize_msg
 
-HEARTBEAT_ROUTING_KEY = "heartbeat"
-
 
 class HeartbeatSender:
 
@@ -36,7 +34,7 @@ class HeartbeatSender:
             message = serialize_msg(MsgType.HEARTBEAT, self.container_id, self.worker_name)
 
             while not self._stop.is_set():
-                queue.send(message, routing_key=HEARTBEAT_ROUTING_KEY)
+                queue.send(message)
                 self._stop.wait(self.interval)
 
         except Exception:
