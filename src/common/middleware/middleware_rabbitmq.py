@@ -117,9 +117,6 @@ class _MessageMiddlewareRabbitMQBase:
             raise _StopConsuming
 
     def close(self):
-        if self._stop_requested:
-            return
-
         try:
             self.chan.close()
             self.conn.close()
@@ -152,8 +149,6 @@ class MessageMiddlewareExchangeRabbitMQ(_MessageMiddlewareRabbitMQBase, MessageM
             return
 
         if self.fixed_queue_name:
-            # Cola durable con nombre fijo: sobrevive a la caida del consumidor,
-            # acumula lo que llega mientras esta caido y devuelve lo no ackeado.
             result = self.chan.queue_declare(queue=self.fixed_queue_name, durable=True)
         else:
             result = self.chan.queue_declare(queue="", exclusive=True)

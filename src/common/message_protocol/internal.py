@@ -16,6 +16,9 @@ class MsgType(IntEnum):
     WORD_BATCH = auto()
     HEARTBEAT = auto()
     GOSSIP = auto()
+    ELECTION = auto()
+    ELECTION_OK = auto()
+    COORDINATOR = auto()
 
 
 MESSAGE_TYPE_OFFSET = 0

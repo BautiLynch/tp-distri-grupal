@@ -589,15 +589,6 @@ services:
       join:
         condition: service_started
         required: true
-      monitor_0:
-        condition: service_started
-        required: true
-      monitor_1:
-        condition: service_started
-        required: true
-      monitor_2:
-        condition: service_started
-        required: true
       rabbitmq:
         condition: service_healthy
         required: true
@@ -688,6 +679,49 @@ services:
       HEARTBEAT_INTERVAL: "5"
       GOSSIP_EXCHANGE: monitor_gossip
       INPUT_QUEUE: heartbeat
+      MONITOR_AMOUNT: "3"
+      MOM_HOST: rabbitmq
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        type: bind
+  monitor_1:
+    build:
+      context: ./src
+      dockerfile: monitor/Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+        required: true
+    environment:
+      ID: "1"
+      HEARTBEAT_ALLOWED_MISSES: "3"
+      HEARTBEAT_INTERVAL: "5"
+      GOSSIP_EXCHANGE: monitor_gossip
+      INPUT_QUEUE: heartbeat
+      MONITOR_AMOUNT: "3"
+      MOM_HOST: rabbitmq
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        type: bind
+  monitor_2:
+    build:
+      context: ./src
+      dockerfile: monitor/Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+        required: true
+    environment:
+      ID: "2"
+      HEARTBEAT_ALLOWED_MISSES: "3"
+      HEARTBEAT_INTERVAL: "5"
+      GOSSIP_EXCHANGE: monitor_gossip
+      INPUT_QUEUE: heartbeat
+      MONITOR_AMOUNT: "3"
       MOM_HOST: rabbitmq
       PYTHONUNBUFFERED: "1"
     volumes:
