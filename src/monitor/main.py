@@ -33,6 +33,7 @@ class Monitor:
         self.is_leader = False
         self.leader_term = 0
         self.containers = {}
+        self.worker_names = {}
         self.heartbeat_consumer = None
         self.leader_threads = []
 
@@ -63,7 +64,8 @@ class Monitor:
                 if age_ms < 0:
                     age_ms = 0
 
-                result.append((container_id, age_ms))
+                worker_name = self.worker_names.get(container_id, container_id)
+                result.append((container_id, worker_name, age_ms))
 
         return result
 
@@ -72,13 +74,14 @@ class Monitor:
         with self.condition:
             now = time.monotonic()
             last_seen = {}
-            for container_id, age_ms in containers:
+            for container_id, worker_name, age_ms in containers:
                 last_seen[container_id] = now - (age_ms / 1000)
+                self.worker_names[container_id] = worker_name
 
             if self.is_leader:
                 for container, seen in last_seen.items():
                     if container not in self.containers:
-                        logging.info(f"Learned container {container} from monitor {sender}")
+                        logging.info(f"Learned {self.worker_names[container]} (container {container}) from monitor {sender}")
                         self.containers[container] = self._with_grace(seen, now)
                 self.condition.notify_all()
             elif from_leader:
@@ -89,7 +92,7 @@ class Monitor:
             self.bully.leader_lost(peer)
         elif self.is_leader:
             logging.info(f"Monitor {peer} gossip timeout")
-            self._restart(container_id)
+            self._restart(container_id, f"monitor_{peer}")
 
     def _on_leader_change(self, leader):
         with self.condition:
@@ -101,8 +104,7 @@ class Monitor:
                 self._step_down_locked()
 
 
-    @staticmethod
-    def _with_grace(last_seen, now):
+    def _with_grace(self, last_seen, now):
         return max(last_seen, now + HEARTBEAT_INTERVAL - HEARTBEAT_TIMEOUT)
 
     def _become_leader_locked(self):
@@ -162,6 +164,7 @@ class Monitor:
             logging.debug(f"Received heartbeat from {worker_name} (container {container_id})")
 
             with self.condition:
+                self.worker_names[container_id] = worker_name
                 if self.is_leader:
                     self.containers[container_id] = max(self.containers.get(container_id, seen), seen)
                     self.condition.notify_all()
@@ -187,23 +190,25 @@ class Monitor:
                     continue
 
                 self.containers[container] = time.monotonic()
+                worker_name = self.worker_names.get(container, container)
 
-            logging.info(f"{container} heartbeat exceeded")
-            self._restart(container)
+            logging.info(f"{worker_name} heartbeat exceeded")
+            self._restart(container, worker_name)
 
-    def _restart(self, container_id):
-        threading.Thread(target=self._restart_container, args=(container_id,)).start()
+    def _restart(self, container_id, name):
+        threading.Thread(target=self._restart_container, args=(container_id, name)).start()
 
-    def _restart_container(self, container_id):
+    def _restart_container(self, container_id, name):
         try:
-            logging.info(f"Restarting container {container_id}")
+            logging.info(f"Restarting {name} (container {container_id})")
             client.containers.get(container_id).restart()
         except NotFound:
-            logging.warning(f"Container {container_id} no longer exists")
+            logging.warning(f"{name} (container {container_id}) no longer exists")
             with self.condition:
                 self.containers.pop(container_id, None)
+                self.worker_names.pop(container_id, None)
         except Exception as e:
-            logging.error(f"Error restarting {container_id}: {e}")
+            logging.error(f"Error restarting {name} (container {container_id}): {e}")
 
     def _fail(self):
         self.failed = True

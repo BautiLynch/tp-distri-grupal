@@ -25,8 +25,8 @@ class Gossip:
         self.timeout = timeout
         self.container_id = container_id
 
-        self.current_containers = current_containers    # () -> [(container_id, age_ms)]
-        self.on_containers = on_containers              # (sender, [(container_id, age_ms)])
+        self.current_containers = current_containers    # () -> [(container_id, worker_name, age_ms)]
+        self.on_containers = on_containers              # (sender, [(container_id, worker_name, age_ms)])
         self.on_election_message = on_election_message  # (msg_type, sender)
         self.on_peer_timeout = on_peer_timeout          # (peer_id, container_id)
         self.on_failure = on_failure
