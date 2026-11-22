@@ -592,12 +592,6 @@ services:
       monitor_0:
         condition: service_started
         required: true
-      monitor_1:
-        condition: service_started
-        required: true
-      monitor_2:
-        condition: service_started
-        required: true
       rabbitmq:
         condition: service_healthy
         required: true
