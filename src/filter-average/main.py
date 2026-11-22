@@ -5,7 +5,9 @@ import sys
 
 from common import middleware
 from common.shutdown import GracefulShutdown
-from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
+from common.storage.message_publisher import MessagePublisher
+from common.storage.eof_counter import EofCounter
+from common.message_protocol.internal import deserialize_msg, MsgType
 from common.message_protocol.queries import QueryId
 
 ID = os.environ["ID"]
@@ -30,18 +32,23 @@ class FilterAverage:
             MOM_HOST, OUTPUT_EXCHANGE, [], consume=False
         )
 
-        self.eof_by_client = {}
+        self.eofs = EofCounter(
+            f"{STORAGE_PATH}/filter_average_{ID}_eofs", FILTER_YEAR_AMOUNT + AVERAGE_AMOUNT
+        )
+        self.baseline_eofs = EofCounter(
+            f"{STORAGE_PATH}/filter_average_{ID}_baseline_eofs", FILTER_YEAR_AMOUNT
+        )
+        self.results = MessagePublisher(self.output_exchange, f"{STORAGE_PATH}/filter_average_{ID}.wal")
         self.words_by_client = {}
         self.average_by_client = {}
         self.pending_messages_by_client = {}
 
-    def _process_eof(self, client_id, message_type):
-        eof = self.eof_by_client.setdefault(client_id, {"total": 0, "baseline": 0})
-        eof["total"] += 1
+    def _process_eof(self, client_id, message_id, message_type, sender_id):
+        total = self.eofs.save(client_id, (message_id, sender_id))
         if message_type == MsgType.BASELINE_END:
-            eof["baseline"] += 1
+            baseline = self.baseline_eofs.save(client_id, (message_id, sender_id))
 
-        if (message_type == MsgType.BASELINE_END and eof["baseline"] == FILTER_YEAR_AMOUNT):
+        if message_type == MsgType.BASELINE_END and baseline == FILTER_YEAR_AMOUNT:
             words_by_url = self.words_by_client.get(client_id, {})
             amount_urls = len(words_by_url)
             amount_words = sum(words_by_url.values())
@@ -50,28 +57,29 @@ class FilterAverage:
             logging.info(f"Average for client {client_id} calculated: {self.average_by_client[client_id]}")
             logging.info(f"Processing pending messages for client {client_id}: length {len(self.pending_messages_by_client.get(client_id, []))}")
             for url, amount_words in self.pending_messages_by_client.get(client_id, []):
-                self._process_abstract(client_id, url, amount_words)
+                self._process_abstract(client_id, message_id, url, amount_words)
 
-        if eof["total"] == FILTER_YEAR_AMOUNT + AVERAGE_AMOUNT:
-            self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, QueryId.Q5), routing_key=client_id)
+        if total == FILTER_YEAR_AMOUNT + AVERAGE_AMOUNT:
+            self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), QueryId.Q5)
             self._release_client(client_id)
 
     def _release_client(self, client_id):
-        self.eof_by_client.pop(client_id, None)
+        self.eofs.clear(client_id)
+        self.baseline_eofs.clear(client_id)
         self.words_by_client.pop(client_id, None)
         self.pending_messages_by_client.pop(client_id, None)
         self.average_by_client.pop(client_id, None)
 
-    def _process_abstract(self, client_id, url, amount_words):
+    def _process_abstract(self, client_id, message_id, url, amount_words):
         if self.average_by_client.get(client_id) is None:
             self.pending_messages_by_client.setdefault(client_id, []).append((url, amount_words))
             return
         
         if amount_words > self.average_by_client[client_id]:
-            self.output_exchange.send_to(serialize_msg(MsgType.RESULT, client_id, QueryId.Q5, url, amount_words), routing_key=client_id)
+            self.results.send(MsgType.RESULT, client_id, message_id, (url, MsgType.RESULT), QueryId.Q5, url, amount_words)
 
     def process_message(self, message, ack, nack):
-        message_type, client_id, fields = deserialize_msg(message)
+        message_type, client_id, message_id, fields = deserialize_msg(message)
         if message_type == MsgType.WORD_YEAR_AMOUNT:
             url, date_modified, amount = fields
 
@@ -79,10 +87,10 @@ class FilterAverage:
                 words_by_url = self.words_by_client.setdefault(client_id, {})
                 words_by_url[url] = words_by_url.get(url, 0) + amount
             else:
-                self._process_abstract(client_id, url, amount)
+                self._process_abstract(client_id, message_id, url, amount)
 
         elif message_type in (MsgType.BASELINE_END, MsgType.END_OF_RECORDS):
-            self._process_eof(client_id, message_type)
+            self._process_eof(client_id, message_id, message_type, fields[0])
 
         else:
             nack()
@@ -90,13 +98,20 @@ class FilterAverage:
         ack()
 
     def close(self):
-        for mom in [self.input_exchange, self.output_exchange]:
+        for mom in [self.input_exchange, self.output_exchange, self.results, self.eofs, self.baseline_eofs]:
             try:
                 mom.close()
             except Exception as e:
                 logging.error(f"Error closing message middleware: {e}")
 
     def start(self):
+        try:
+            self.eofs.recover()
+            self.baseline_eofs.recover()
+            self.results.recover()
+        except Exception:
+            self.close()
+            raise
         self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 def main():

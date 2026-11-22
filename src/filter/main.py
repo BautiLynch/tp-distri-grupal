@@ -49,20 +49,20 @@ class FilterYearPlus:
 
     def process_message(self, message, ack, nack):
         try:
-            message_type, client_id, fields = deserialize_msg(message)
+            message_type, client_id, message_id, fields = deserialize_msg(message)
             if message_type == MsgType.FILTER_ARTICLE:
                 name, url, language, date_modified, image_url, sections = fields
 
                 if datetime.fromisoformat(date_modified.replace("Z", "+00:00")).year <= YEAR:
                     if language.lower() == LANGUAGE.lower():
-                        self.results.send(MsgType.RESULT, client_id, QueryId.Q1, url, date_modified)
+                        self.results.send(MsgType.RESULT, client_id, message_id, (message_id, MsgType.RESULT), QueryId.Q1, url, date_modified)
 
                     if self.sections.intersection(section.lower() for section in sections):
-                        self.images.send(MsgType.GET_IMAGE, client_id, url, name, image_url)
+                        self.images.send(MsgType.GET_IMAGE, client_id, message_id, (message_id, MsgType.GET_IMAGE), url, name, image_url)
 
             elif message_type == MsgType.END_OF_RECORDS:
-                self.results.send(MsgType.QUERY_END, client_id, QueryId.Q1)
-                self.images.send(MsgType.END_OF_RECORDS, client_id)
+                self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), QueryId.Q1)
+                self.images.send(MsgType.END_OF_RECORDS, client_id, message_id, (message_id, MsgType.END_OF_RECORDS), f"filter_{ID}")
         except Exception:
             logging.exception("Error processing message")
             nack()

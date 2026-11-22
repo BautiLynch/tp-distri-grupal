@@ -4,8 +4,10 @@ import sys
 
 from common import middleware
 from common.shutdown import GracefulShutdown
+from common.storage.message_publisher import MessagePublisher
+from common.storage.eof_counter import EofCounter
 from common.key_item import KeyItem
-from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
+from common.message_protocol.internal import deserialize_msg, MsgType
 from common.message_protocol.queries import QueryId
 
 MOM_HOST = os.environ["MOM_HOST"]
@@ -25,7 +27,8 @@ class JoinFilter:
             MOM_HOST, OUTPUT_EXCHANGE, [], consume=False
         )
 
-        self.agg_by_client = {} # Contador
+        self.eofs = EofCounter("storage/join_eofs", AGGREGATION_AMOUNT)
+        self.results = MessagePublisher(self.output_exchange, "storage/join.wal")
         self.top_by_client = {} # Lista de palabras
 
     def _process_data(self, client_id, top_parcial):
@@ -39,9 +42,9 @@ class JoinFilter:
 
         self.top_by_client[client_id] = top_client[:TOP_SIZE]
 
-    def _all_tops_recieved(self, client_id):
-        self.agg_by_client[client_id] = self.agg_by_client.get(client_id, 0) + 1
-        if self.agg_by_client[client_id] < AGGREGATION_AMOUNT:
+    def _all_tops_recieved(self, client_id, message_id, sender_id):
+        count = self.eofs.save(client_id, (message_id, sender_id))
+        if count < AGGREGATION_AMOUNT:
             return
         
         final_top = self.top_by_client.get(client_id, [])
@@ -52,33 +55,41 @@ class JoinFilter:
             for item in final_top
         ]
 
-        self.output_exchange.send_to(serialize_msg(MsgType.RESULT, client_id, QueryId.Q4, result), routing_key=client_id)
-        self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, QueryId.Q4), routing_key=client_id)
+        self.results.send(MsgType.RESULT, client_id, message_id, (message_id, MsgType.RESULT), QueryId.Q4, result)
+        self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), QueryId.Q4)
 
         self._release_client(client_id)
 
     def _release_client(self, client_id):
-        self.agg_by_client.pop(client_id, None)
+        self.eofs.clear(client_id)
         self.top_by_client.pop(client_id, None)
 
     def process_message(self, message, ack, nack):
-        message_type, client_id, fields = deserialize_msg(message)
+        message_type, client_id, message_id, fields = deserialize_msg(message)
         if message_type == MsgType.PARTIAL_TOP:
-            self._process_data(client_id, *fields)
-            self._all_tops_recieved(client_id)
+            top_parcial, sender_id = fields
+            if (message_id, sender_id) not in self.eofs.received.get(client_id, set()):
+                self._process_data(client_id, top_parcial)
+            self._all_tops_recieved(client_id, message_id, sender_id)
         else:
             nack()
             return
         ack()
 
     def close(self):
-        for mom in [self.input_queue, self.output_exchange]:
+        for mom in [self.input_queue, self.output_exchange, self.results, self.eofs]:
             try:
                 mom.close()
             except Exception as e:
                 logging.error(f"Error closing message middleware: {e}")
     
     def start(self):
+        try:
+            self.eofs.recover()
+            self.results.recover()
+        except Exception:
+            self.close()
+            raise
         self.shutdown.run(self.input_queue, self.process_message, self.close)
 
 def main():

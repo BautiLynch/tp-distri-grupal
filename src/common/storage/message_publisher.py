@@ -1,7 +1,6 @@
-import logging
-
-from common.message_protocol.internal import deserialize_msg, serialize_msg
-from common.storage.wal import WriteAheadLog
+from common.message_protocol.internal import serialize_msg
+from common.message_protocol.fields import encode_fields
+from common.storage.wal import WriteAheadLog, PROCESSED
 
 
 class MessagePublisher:
@@ -9,25 +8,25 @@ class MessagePublisher:
         self.exchange = exchange
         self.get_routing_key = get_routing_key
         self.wal = WriteAheadLog(path)
+        self.sent = set()
 
-    def send(self, message_type, client_id, *fields):
-        message = serialize_msg(message_type, client_id, *fields)
-        self.wal.save(message)
+    def send(self, message_type, client_id, message_id, key, *fields):
+        record = encode_fields(client_id, key)
+        if record in self.sent:
+            return
+        message = serialize_msg(message_type, client_id, message_id, *fields)
+        self.wal.save(record)
         self._publish(message, message_type, client_id, fields)
+        self.sent.add(record)
 
     def recover(self):
-        pending = self.wal.load()
-        if pending is None:
-            return
-        try:
-            message_type, client_id, fields = deserialize_msg(pending)
-        except ValueError:
-            logging.warning("Discarding unreadable message WAL")
-            self.wal.discard()
-            return
-
-        self._publish(pending, message_type, client_id, fields)
-        return message_type, client_id
+        self.wal.file.seek(0)
+        entry = self.wal.read()
+        while entry is not None:
+            status, record = entry
+            if status == PROCESSED:
+                self.sent.add(record)
+            entry = self.wal.read()
 
     def _publish(self, message, message_type, client_id, fields):
         routing_key = client_id

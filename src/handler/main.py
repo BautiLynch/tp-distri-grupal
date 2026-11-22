@@ -58,7 +58,7 @@ class ClientHandler:
 
     def handle_result(self, message, ack, nack):
         try:
-            message_type, _, fields = (
+            message_type, _, message_id, fields = (
                 deserialize_msg(message)
             )
             if message_type == InternalMsgType.QUERY_END:

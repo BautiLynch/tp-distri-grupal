@@ -47,7 +47,7 @@ class ImageGetter:
             return response.read()
 
     def process_message(self, message, ack, nack):
-        message_type, client_id, fields = deserialize_msg(message)
+        message_type, client_id, message_id, fields = deserialize_msg(message)
         if message_type == MsgType.GET_IMAGE:
             url, name, image_url = fields
             try:
@@ -72,15 +72,13 @@ class ImageGetter:
                     self.rate_limited_until = time.time() + delay
                     logging.debug("Wikimedia returned 429; skipping downloads for %s seconds", delay)
                 image = b""
-            self.results.send(MsgType.RESULT, client_id, QueryId.Q2, name, url, image)
+            self.results.send(MsgType.RESULT, client_id, message_id, (message_id, MsgType.RESULT), QueryId.Q2, name, url, image)
 
         elif message_type == MsgType.END_OF_RECORDS:
-            count = self.eofs.get(client_id) + 1
+            count = self.eofs.save(client_id, (message_id, fields[0]))
             if count == FILTER_YEAR_PLUS_AMOUNT:
-                self.results.send(MsgType.QUERY_END, client_id, QueryId.Q2)
+                self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), QueryId.Q2)
                 self.eofs.clear(client_id)
-            else:
-                self.eofs.save(client_id, count)
 
         else:
             nack()
@@ -97,11 +95,7 @@ class ImageGetter:
     def start(self):
         try:
             self.eofs.recover()
-            recovered = self.results.recover()
-            if recovered is not None:
-                message_type, client_id = recovered
-                if message_type == MsgType.QUERY_END:
-                    self.eofs.clear(client_id)
+            self.results.recover()
         except Exception:
             self.close()
             raise
