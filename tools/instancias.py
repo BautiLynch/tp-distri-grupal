@@ -84,6 +84,8 @@ def scale_config(config, target, amount):
                 path = Path(env["OUTPUT_DIR"])
                 stem = re.sub(r"_\d+$", "", path.name)
                 env["OUTPUT_DIR"] = str(path.with_name(f"{stem}_{index}")).replace("\\", "/")
+                dataset = Path(env["INPUT_PATH"])
+                env["INPUT_PATH"] = str(dataset.with_name(f"{index + 1}.jsonl")).replace("\\", "/")
             if index not in replicas[group]:
                 for volume in clone.get("volumes", []):
                     if volume["type"] == "volume":
@@ -181,7 +183,7 @@ def main():
         compose_config(temporary, "--quiet")
         os.replace(temporary, path)
         print(f"Actualizado {path.name}: " + ", ".join(f"{group}={count}" for group, count in counts.items()))
-        print("No se iniciaron contenedores. Para aplicar: docker compose up --build --remove-orphans")
+        print("Prepará los archivos de entrada de los clientes nuevos antes de ejecutar make up.")
     except (OSError, ValueError) as error:
         parser.exit(1, f"Error: {error}\n")
     finally:

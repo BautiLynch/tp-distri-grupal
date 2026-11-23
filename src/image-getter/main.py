@@ -1,7 +1,10 @@
 import os
 import socket
 import logging
+import time
+import urllib.error
 import urllib.request
+import sys
 
 from common import middleware
 from common.heartbeat import HeartbeatSender
@@ -17,7 +20,10 @@ OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 FILTER_YEAR_PLUS_AMOUNT = int(os.environ["FILTER_YEAR_PLUS_AMOUNT"])
 IMAGE_TIMEOUT = float(os.environ.get("IMAGE_TIMEOUT", "10"))
-IMAGE_USER_AGENT = os.environ.get("IMAGE_USER_AGENT", "tp-distribuidos")
+IMAGE_USER_AGENT = os.environ.get(
+    "IMAGE_USER_AGENT", "tp-distribuidos/0.0 (https://github.com/BautiLynch/tp-distri-grupal.git)"
+)
+IMAGE_RATE_LIMIT_DELAY = 60
 
 
 class ImageGetter:
@@ -34,9 +40,10 @@ class ImageGetter:
         )
 
         self.eof_by_client = {}
+        self.rate_limited_until = 0
 
     def _get_image(self, client_id, name, url, image_url):
-        if not image_url:
+        if not image_url or time.time() < self.rate_limited_until:
             self.output_exchange.send_to(serialize_msg(MsgType.RESULT, client_id, QueryId.Q2, name, url, b""), routing_key=client_id)
             return
 
@@ -61,8 +68,16 @@ class ImageGetter:
                 if status_code == 403:
                     nack()
                     return
-                else:
-                    self.output_exchange.send_to(serialize_msg(MsgType.RESULT, client_id, QueryId.Q2, name, url, b""), routing_key=client_id)
+                if isinstance(error, urllib.error.HTTPError) and status_code == 429:
+                    with error:
+                        retry_after = error.headers.get("Retry-After", "")
+                    try:
+                        delay = int(retry_after)
+                    except ValueError:
+                        delay = IMAGE_RATE_LIMIT_DELAY
+                    self.rate_limited_until = time.time() + delay
+                    logging.debug("Wikimedia returned 429; skipping downloads for %s seconds", delay)
+                self.output_exchange.send_to(serialize_msg(MsgType.RESULT, client_id, QueryId.Q2, name, url, b""), routing_key=client_id)
 
         elif message_type == MsgType.END_OF_RECORDS:
             self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
@@ -102,4 +117,4 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

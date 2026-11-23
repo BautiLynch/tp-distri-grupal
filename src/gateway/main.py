@@ -3,6 +3,7 @@ import multiprocessing
 import os
 import signal
 import socket
+import sys
 
 from common import middleware, message_protocol
 
@@ -154,4 +155,4 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

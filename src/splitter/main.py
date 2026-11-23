@@ -1,6 +1,7 @@
 import os
 import socket
 import logging
+import sys
 
 from common import middleware, hashing
 from common.heartbeat import HeartbeatSender
@@ -123,4 +124,4 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

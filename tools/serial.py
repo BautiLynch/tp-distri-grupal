@@ -4,12 +4,10 @@ from datetime import datetime
 import hashlib
 import heapq
 import json
-import os
 from pathlib import Path
 import signal
 import sys
 import tempfile
-import time
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -77,8 +75,6 @@ def analyze(source_path, ignored, cutoff_year, wanted_language, accepted, limit)
                 article_count += 1
             except (ValueError, KeyError, TypeError, AttributeError) as error:
                 raise ValueError(f"{source_path}, linea {line_number}: {error}") from error
-            if article_count % 100000 == 0:
-                print(f"Procesados {article_count} articulos", file=sys.stderr)
 
     # Desempate estable; tambien se guardan todas las candidatas empatadas.
     ranking = heapq.nsmallest(limit, frequencies.items(), key=lambda pair: (-pair[1], pair[0]))
@@ -110,17 +106,12 @@ def analyze(source_path, ignored, cutoff_year, wanted_language, accepted, limit)
 
 def save_reference(destination, result):
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=destination.parent,
-                                         suffix=".tmp", delete=False) as output:
-            temporary = Path(output.name)
+    with tempfile.TemporaryDirectory(dir=destination.parent) as directory:
+        temporary = Path(directory) / destination.name
+        with temporary.open("w", encoding="utf-8") as output:
             json.dump(result, output, ensure_ascii=False, indent=2)
             output.write("\n")
-        os.replace(temporary, destination)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+        destination.hardlink_to(temporary)
 
 
 def cancel(signum, frame):
@@ -131,30 +122,22 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dataset", type=Path, help="dataset JSONL enviado al cliente")
     parser.add_argument("--output", required=True, type=Path, help="JSON nuevo para guardar la referencia")
-    parser.add_argument("--stopwords", type=Path, default=PROJECT / "src/splitter/stopwords")
-    parser.add_argument("--year", type=int, default=2020)
-    parser.add_argument("--language", choices=("en", "fr"), default="en")
-    parser.add_argument("--sections", default="Biography,Biographie")
-    parser.add_argument("--top", type=int, default=20)
     args = parser.parse_args()
-    if args.top < 1:
-        parser.error("--top debe ser positivo")
     if args.output.exists():
         parser.error(f"ya existe {args.output}; elegi otro archivo para conservar la referencia")
 
     signal.signal(signal.SIGTERM, cancel)
     try:
-        ignored = set()
-        stopword_hashes = {}
-        for filename in ("english.txt", "french.txt"):
-            path = args.stopwords / filename
-            raw = path.read_bytes()
-            stopword_hashes[filename] = hashlib.sha256(raw).hexdigest()
-            ignored.update(word.strip() for word in raw.decode("utf-8").splitlines())
-        result = analyze(args.dataset, ignored, args.year, args.language,
-                         {name.strip().lower() for name in args.sections.split(",") if name.strip()},
-                         args.top)
-        result["config"]["stopwords_sha256"] = stopword_hashes
+        stopword_dir = PROJECT / "src/splitter/stopwords"
+        stopwords = {name: (stopword_dir / name).read_bytes()
+                     for name in ("english.txt", "french.txt")}
+        ignored = {word.strip() for raw in stopwords.values()
+                   for word in raw.decode("utf-8").splitlines()}
+        result = analyze(args.dataset, ignored, cutoff_year=2020, wanted_language="en",
+                         accepted={"biography", "biographie"}, limit=20)
+        result["config"]["stopwords_sha256"] = {
+            name: hashlib.sha256(raw).hexdigest() for name, raw in stopwords.items()
+        }
         save_reference(args.output, result)
     except KeyboardInterrupt:
         print("Ejecucion serial interrumpida; no se publico la referencia.", file=sys.stderr)
@@ -169,8 +152,4 @@ def main():
 
 
 if __name__ == "__main__":
-    started_at = time.perf_counter()
-    try:
-        raise SystemExit(main())
-    finally:
-        print(f"Tiempo total: {time.perf_counter() - started_at:.3f} segundos", file=sys.stderr)
+    sys.exit(main())

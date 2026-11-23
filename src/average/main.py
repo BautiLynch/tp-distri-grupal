@@ -2,6 +2,7 @@ from datetime import datetime
 import os
 import socket
 import logging
+import sys
 
 from common import middleware, storage, hashing
 from common.heartbeat import HeartbeatSender
@@ -100,4 +101,4 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

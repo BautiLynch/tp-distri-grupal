@@ -28,19 +28,18 @@ Descarga una muestra del dataset del tamaño indicado y calcula los resultados e
 ## Ejecutar
 
 ```bash
-make
+make test
 ```
 
 Levanta el sistema, muestra los logs, espera a que terminen los clientes, verifica sus resultados contra la referencia y baja los contenedores. El resultado queda en `verificacion.log` y los logs en `ejecucion.log`.
 
+Para activar los logs de debug, ejecutá `make test LOG_LEVEL=DEBUG`.
+
 Cada cliente guarda su salida en `output/cliente_<n>/`:
 
 - `q1.json`, `q3.json`, `q4.json` y `q5.json`: resultados de cada query en JSON.
-- `q2/q2.json`: artículos de la Q2. El campo `image` indica dónde está su imagen: un archivo `img_*`, `resto.bin` o `null` si no se pudo obtener.
-- `q2/img_*`: las primeras `Q2_IMAGE_LIMIT` imágenes recibidas, listas para abrir.
-- `q2/resto.bin`: las demás imágenes, en el formato binario del protocolo externo.
-
-`Q2_IMAGE_LIMIT` se configura en cada cliente del `docker-compose.yaml`.
+- `q2/q2.json`: artículos de la Q2. El campo `image` contiene el nombre del archivo de imagen o `null` si no se pudo obtener.
+- `q2/img_*`: todas las imágenes recibidas, guardadas en archivos individuales y listas para abrir.
 
 ### Paso a paso
 

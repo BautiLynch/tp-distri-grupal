@@ -2,6 +2,7 @@ import heapq
 import os
 import socket
 import logging
+import sys
 
 from common import middleware, storage
 from common.heartbeat import HeartbeatSender
@@ -94,4 +95,4 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

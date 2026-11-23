@@ -1,6 +1,7 @@
 import os
 import logging
 import socket
+import sys
 
 from datetime import datetime
 from common import middleware, hashing
@@ -97,4 +98,4 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

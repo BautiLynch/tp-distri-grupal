@@ -165,7 +165,6 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       OUTPUT_DIR: /output/cliente_0
       PYTHONUNBUFFERED: "1"
-      Q2_IMAGE_LIMIT: "10"
     volumes:
       - bind:
           create_host_path: true
@@ -197,7 +196,6 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       OUTPUT_DIR: /output/cliente_1
       PYTHONUNBUFFERED: "1"
-      Q2_IMAGE_LIMIT: "10"
     volumes:
       - bind:
           create_host_path: true
@@ -229,7 +227,6 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       OUTPUT_DIR: /output/cliente_2
       PYTHONUNBUFFERED: "1"
-      Q2_IMAGE_LIMIT: "10"
     volumes:
       - bind:
           create_host_path: true
