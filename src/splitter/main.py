@@ -55,7 +55,7 @@ class Splitter:
 
         return set(stopwords_list)
 
-    def _split_and_send(self, client_id, message_id, article):
+    def _split_and_send(self, client_id, message_id, article, source):
         url, language, date_modified, abstract = article
         text = "".join(char if char.isalnum() or char == "_" else " "
                        for char in abstract.lower())
@@ -77,10 +77,10 @@ class Splitter:
         for key, batch in batches.items():
             if self.shutdown.requested.is_set():
                 break
-            self.publisher.send(MsgType.WORD_BATCH, client_id, message_id, (message_id, MsgType.WORD_BATCH, key), language, batch)
+            self.publisher.send(MsgType.WORD_BATCH, client_id, message_id, (message_id, MsgType.WORD_BATCH, key), source, language, batch)
         if word_count:
             self.publisher.send(
-                MsgType.WORD_YEAR_AMOUNT, client_id, message_id, (message_id, MsgType.WORD_YEAR_AMOUNT), url, date_modified, sum(word_count.values())
+                MsgType.WORD_YEAR_AMOUNT, client_id, message_id, (message_id, MsgType.WORD_YEAR_AMOUNT), source, url, date_modified, sum(word_count.values())
             )
 
     def process_message(self, message, ack, nack):
@@ -91,10 +91,10 @@ class Splitter:
                 ack()
                 return
             if message_type == MsgType.SPLITTER_ARTICLE:
-                self._split_and_send(client_id, message_id, fields)
+                self._split_and_send(client_id, message_id, fields, source=(producer_id, key))
 
             elif message_type == MsgType.END_OF_RECORDS:
-                self.publisher.send(message_type, client_id, message_id, (message_id, message_type), f"splitter_{ID}")
+                self.publisher.send(message_type, client_id, message_id, (message_id, message_type), (producer_id, key), f"splitter_{ID}")
 
             else:
                 raise ValueError(f"Unexpected splitter message type: {message_type}")
@@ -102,7 +102,7 @@ class Splitter:
         except Exception:
             logging.exception("Could not process splitter input")
             nack()
-            return
+            raise
         self.last_received[producer] = key
         ack()
 

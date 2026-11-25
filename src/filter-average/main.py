@@ -44,7 +44,7 @@ class FilterAverage:
         self.average_by_client = {}
         self.pending_messages_by_client = {}
 
-    def _process_eof(self, client_id, message_id, message_type, sender_id):
+    def _process_eof(self, client_id, message_id, message_type, sender_id, source):
         total = self.eofs.save(client_id, (message_id, sender_id))
         if message_type == MsgType.BASELINE_END:
             baseline = self.baseline_eofs.save(client_id, (message_id, sender_id))
@@ -58,10 +58,10 @@ class FilterAverage:
             logging.info(f"Average for client {client_id} calculated: {self.average_by_client[client_id]}")
             logging.info(f"Processing pending messages for client {client_id}: length {len(self.pending_messages_by_client.get(client_id, []))}")
             for url, amount_words in self.pending_messages_by_client.get(client_id, []):
-                self._process_abstract(client_id, message_id, url, amount_words)
+                self._process_abstract(client_id, message_id, url, amount_words, source=source)
 
         if total == FILTER_YEAR_AMOUNT + AVERAGE_AMOUNT:
-            self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), QueryId.Q5)
+            self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), source, QueryId.Q5)
             self._release_client(client_id)
 
     def _release_client(self, client_id):
@@ -71,13 +71,13 @@ class FilterAverage:
         self.pending_messages_by_client.pop(client_id, None)
         self.average_by_client.pop(client_id, None)
 
-    def _process_abstract(self, client_id, message_id, url, amount_words):
+    def _process_abstract(self, client_id, message_id, url, amount_words, source):
         if self.average_by_client.get(client_id) is None:
             self.pending_messages_by_client.setdefault(client_id, []).append((url, amount_words))
             return
         
         if amount_words > self.average_by_client[client_id]:
-            self.results.send(MsgType.RESULT, client_id, message_id, (url, MsgType.RESULT), QueryId.Q5, url, amount_words)
+            self.results.send(MsgType.RESULT, client_id, message_id, (url, MsgType.RESULT), source, QueryId.Q5, url, amount_words)
 
     def process_message(self, message, ack, nack):
         message_type, client_id, message_id, producer_id, key, fields = deserialize_msg(message)
@@ -92,10 +92,10 @@ class FilterAverage:
                 words_by_url = self.words_by_client.setdefault(client_id, {})
                 words_by_url[url] = words_by_url.get(url, 0) + amount
             else:
-                self._process_abstract(client_id, message_id, url, amount)
+                self._process_abstract(client_id, message_id, url, amount, source=(producer_id, key))
 
         elif message_type in (MsgType.BASELINE_END, MsgType.END_OF_RECORDS):
-            self._process_eof(client_id, message_id, message_type, fields[0])
+            self._process_eof(client_id, message_id, message_type, fields[0], source=(producer_id, key))
 
         else:
             nack()

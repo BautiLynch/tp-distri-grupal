@@ -46,7 +46,7 @@ class Average:
             return hashing.get_hash_key(f"{client_id}_{fields[0]}", FILTER_AVERAGE_AMOUNT)
         return None
 
-    def _process_eof(self, client_id, message_id, sender_id):
+    def _process_eof(self, client_id, message_id, sender_id, source):
         count = self.eofs.save(client_id, (message_id, sender_id))
         if count != FILTER_YEAR_AMOUNT:
             return
@@ -55,9 +55,9 @@ class Average:
         formatted_date = date.isoformat()
         
         for url, amount in self.urls_by_client.get(client_id, {}).items():
-            self.results.send(MsgType.WORD_YEAR_AMOUNT, client_id, message_id, (url, MsgType.WORD_YEAR_AMOUNT), url, formatted_date, amount)
+            self.results.send(MsgType.WORD_YEAR_AMOUNT, client_id, message_id, (url, MsgType.WORD_YEAR_AMOUNT), source, url, formatted_date, amount)
         
-        self.results.send(MsgType.END_OF_RECORDS, client_id, message_id, (message_id, MsgType.END_OF_RECORDS), f"average_{ID}")
+        self.results.send(MsgType.END_OF_RECORDS, client_id, message_id, (message_id, MsgType.END_OF_RECORDS), source, f"average_{ID}")
         self._release_client(client_id)
 
     def _release_client(self, client_id):
@@ -76,7 +76,7 @@ class Average:
             urls[url] = urls.get(url, 0) + amount
 
         elif message_type == MsgType.END_OF_RECORDS:
-            self._process_eof(client_id, message_id, fields[0])
+            self._process_eof(client_id, message_id, fields[0], source=(producer_id, key))
         else:
             nack()
             return

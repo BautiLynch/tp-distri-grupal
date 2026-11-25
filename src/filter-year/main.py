@@ -62,17 +62,17 @@ class FilterYear:
             
             # Los articulos hasta YEAR alimentan el promedio en todos los filtros.
             if datetime.fromisoformat(date_modified.replace("Z", "+00:00")).year <= YEAR:
-                self.baselines.send(message_type, client_id, message_id, (message_id, message_type), *fields)
+                self.baselines.send(message_type, client_id, message_id, (message_id, message_type), (producer_id, key), *fields)
             # Los posteriores se acumulan por URL en un unico Average.
             else:
-                self.averages.send(message_type, client_id, message_id, (message_id, message_type), *fields)
+                self.averages.send(message_type, client_id, message_id, (message_id, message_type), (producer_id, key), *fields)
 
         elif message_type == MsgType.END_OF_RECORDS:
             count = self.eofs.save(client_id, (message_id, fields[0]))
 
             if count == SPLITTER_AMOUNT:
-                self.baselines.send(MsgType.BASELINE_END, client_id, message_id, (message_id, MsgType.BASELINE_END), f"filter_year_{ID}")
-                self.averages.send(message_type, client_id, message_id, (message_id, message_type), f"filter_year_{ID}")
+                self.baselines.send(MsgType.BASELINE_END, client_id, message_id, (message_id, MsgType.BASELINE_END), (producer_id, key), f"filter_year_{ID}")
+                self.averages.send(message_type, client_id, message_id, (message_id, message_type), (producer_id, key), f"filter_year_{ID}")
                 self.eofs.clear(client_id)
 
         else:

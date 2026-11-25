@@ -36,7 +36,7 @@ class AggregationFilter:
             get_routing_key=lambda message_type, client_id, fields: None,
         )
 
-    def _process_eof(self, client_id, message_id, sender_id):
+    def _process_eof(self, client_id, message_id, sender_id, source):
         # for key in self.storage.load_key(client_id):
         #    top_words[key.key] = top_words.get(key.key, 0) + key.amount
 
@@ -47,7 +47,7 @@ class AggregationFilter:
                 self.words_by_client.get(client_id, {}).items(),
                 key=lambda item: item[1],
             )
-            self.results.send(MsgType.PARTIAL_TOP, client_id, message_id, (message_id, MsgType.PARTIAL_TOP), top_parcial, f"aggregation_{ID}")
+            self.results.send(MsgType.PARTIAL_TOP, client_id, message_id, (message_id, MsgType.PARTIAL_TOP), source, top_parcial, f"aggregation_{ID}")
             self._release_client(client_id)
 
     def _release_client(self, client_id):
@@ -68,7 +68,7 @@ class AggregationFilter:
                 counts[word] = counts.get(word, 0) + 1
             
         elif message_type == MsgType.END_OF_RECORDS:
-            self._process_eof(client_id, message_id, fields[0])
+            self._process_eof(client_id, message_id, fields[0], source=(producer_id, key))
         else:
             nack()
             return

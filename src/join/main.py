@@ -43,7 +43,7 @@ class JoinFilter:
 
         self.top_by_client[client_id] = top_client[:TOP_SIZE]
 
-    def _all_tops_recieved(self, client_id, message_id, sender_id):
+    def _all_tops_recieved(self, client_id, message_id, sender_id, source):
         count = self.eofs.save(client_id, (message_id, sender_id))
         if count < AGGREGATION_AMOUNT:
             return
@@ -56,8 +56,8 @@ class JoinFilter:
             for item in final_top
         ]
 
-        self.results.send(MsgType.RESULT, client_id, message_id, (message_id, MsgType.RESULT), QueryId.Q4, result)
-        self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), QueryId.Q4)
+        self.results.send(MsgType.RESULT, client_id, message_id, (message_id, MsgType.RESULT), source, QueryId.Q4, result)
+        self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), source, QueryId.Q4)
 
         self._release_client(client_id)
 
@@ -75,7 +75,7 @@ class JoinFilter:
             top_parcial, sender_id = fields
             if (message_id, sender_id) not in self.eofs.received.get(client_id, set()):
                 self._process_data(client_id, top_parcial)
-            self._all_tops_recieved(client_id, message_id, sender_id)
+            self._all_tops_recieved(client_id, message_id, sender_id, source=(producer_id, key))
         else:
             nack()
             return

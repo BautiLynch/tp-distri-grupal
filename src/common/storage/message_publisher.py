@@ -1,5 +1,5 @@
 from common.message_protocol.internal import serialize_msg
-from common.message_protocol.fields import encode_fields
+from common.message_protocol.fields import encode_fields, decode_fields
 from common.storage.wal import WriteAheadLog, PROCESSED
 
 
@@ -8,27 +8,34 @@ class MessagePublisher:
         self.exchange = exchange
         self.get_routing_key = get_routing_key
         self.wal = WriteAheadLog(path)
-        self.sent = set()
+        self.last = None
 
-    def send(self, message_type, client_id, message_id, key, *fields):
-        record = encode_fields(client_id, key)
-        if record in self.sent:
+    def send(self, message_type, client_id, message_id, key, source, *fields):
+        if self.last is None or self.last[0] != (client_id, source):
+            self.last = ((client_id, source), set())
+        if key in self.last[1]:
             return
         message = serialize_msg(
             message_type, client_id, message_id, *fields,
             producer_id=str(self.wal.path), key=key,
         )
+        record = encode_fields(client_id, source, key)
         self.wal.save(record)
         self._publish(message, message_type, client_id, fields)
-        self.sent.add(record)
+        self.last[1].add(key)
 
     def recover(self):
         self.wal.file.seek(0)
         entry = self.wal.read()
         while entry is not None:
             status, record = entry
+            client_id, source, key = decode_fields(record)
+            if self.last is None or self.last[0] != (client_id, source):
+                self.last = ((client_id, source), set())
             if status == PROCESSED:
-                self.sent.add(record)
+                self.last[1].add(key)
+            else:
+                self.last[1].discard(key)
             entry = self.wal.read()
 
     def _publish(self, message, message_type, client_id, fields):

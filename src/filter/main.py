@@ -60,18 +60,18 @@ class FilterYearPlus:
 
                 if datetime.fromisoformat(date_modified.replace("Z", "+00:00")).year <= YEAR:
                     if language.lower() == LANGUAGE.lower():
-                        self.results.send(MsgType.RESULT, client_id, message_id, (message_id, MsgType.RESULT), QueryId.Q1, url, date_modified)
+                        self.results.send(MsgType.RESULT, client_id, message_id, (message_id, MsgType.RESULT), (producer_id, key), QueryId.Q1, url, date_modified)
 
                     if self.sections.intersection(section.lower() for section in sections):
-                        self.images.send(MsgType.GET_IMAGE, client_id, message_id, (message_id, MsgType.GET_IMAGE), url, name, image_url)
+                        self.images.send(MsgType.GET_IMAGE, client_id, message_id, (message_id, MsgType.GET_IMAGE), (producer_id, key), url, name, image_url)
 
             elif message_type == MsgType.END_OF_RECORDS:
-                self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), QueryId.Q1)
-                self.images.send(MsgType.END_OF_RECORDS, client_id, message_id, (message_id, MsgType.END_OF_RECORDS), f"filter_{ID}")
+                self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), (producer_id, key), QueryId.Q1)
+                self.images.send(MsgType.END_OF_RECORDS, client_id, message_id, (message_id, MsgType.END_OF_RECORDS), (producer_id, key), f"filter_{ID}")
         except Exception:
             logging.exception("Error processing message")
             nack()
-            return
+            raise
 
         self.last_received[producer] = key
         ack()
