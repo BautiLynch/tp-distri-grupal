@@ -16,8 +16,7 @@ class MessagePublisher:
         if key in self.last[1]:
             return
         message = serialize_msg(
-            message_type, client_id, message_id, *fields,
-            producer_id=str(self.wal.path), key=key,
+            message_type, client_id, message_id, str(self.wal.path), key, *fields,
         )
         record = encode_fields(client_id, source, key)
         self.wal.save(record)

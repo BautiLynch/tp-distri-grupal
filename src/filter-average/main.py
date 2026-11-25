@@ -87,7 +87,8 @@ class FilterAverage:
             self.results.send(MsgType.RESULT, client_id, message_id, (url, MsgType.RESULT), source, QueryId.Q5, url, amount_words)
 
     def process_message(self, message, ack, nack):
-        message_type, client_id, message_id, producer_id, key, fields = deserialize_msg(message)
+        message_type, fields = deserialize_msg(message)
+        client_id, message_id, producer_id, key, *fields = fields
         producer = (client_id, producer_id)
         if self.last_received.get(producer) == key:
             ack()

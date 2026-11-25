@@ -160,7 +160,7 @@ class Monitor:
 
     def _process_heartbeat(self, message, ack, nack):
         try:
-            _, _, _, _, _, (container_id, worker_name, sent_at) = deserialize_msg(message)
+            _, (container_id, worker_name, sent_at) = deserialize_msg(message)
             seen = time.monotonic() - max(0, time.time() - sent_at)
             logging.debug(f"Received heartbeat from {worker_name} (container {container_id})")
 

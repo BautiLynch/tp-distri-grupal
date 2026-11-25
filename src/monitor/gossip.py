@@ -2,7 +2,6 @@ import logging
 import queue
 import threading
 import time
-from uuid import uuid4
 
 from common import middleware
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
@@ -69,7 +68,7 @@ class Gossip:
                 thread.join(timeout=self.timeout)
 
     def send_election(self, msg_type, target):
-        self._outbox.put((serialize_msg(msg_type, 0, uuid4().bytes, self.my_id), target))
+        self._outbox.put((serialize_msg(msg_type, self.my_id), target))
 
     def _run_sender(self):
         publisher = None
@@ -83,7 +82,7 @@ class Gossip:
                 now = time.monotonic()
                 if now >= next_gossip:
                     gossip = serialize_msg(
-                        MsgType.GOSSIP, 0, uuid4().bytes, self.my_id, self.container_id, self.current_containers()
+                        MsgType.GOSSIP, self.my_id, self.container_id, self.current_containers()
                     )
                     for index in range(self.amount):
                         if index != self.my_id:
@@ -142,7 +141,7 @@ class Gossip:
 
     def _process_message(self, message, ack, nack):
         try:
-            msg_type, _, _, _, _, fields = deserialize_msg(message)
+            msg_type, fields = deserialize_msg(message)
             sender = fields[0]
 
             if msg_type == MsgType.GOSSIP:

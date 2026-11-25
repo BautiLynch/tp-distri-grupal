@@ -59,7 +59,8 @@ class FilterYear:
         return None
 
     def process_message(self, message, ack, nack):
-        message_type, client_id, message_id, producer_id, key, fields = deserialize_msg(message)
+        message_type, fields = deserialize_msg(message)
+        client_id, message_id, producer_id, key, *fields = fields
         producer = (client_id, producer_id)
         if self.last_received.get(producer) == key:
             ack()

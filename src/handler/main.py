@@ -59,9 +59,10 @@ class ClientHandler:
 
     def handle_result(self, message, ack, nack):
         try:
-            message_type, client_id, message_id, producer_id, key, fields = (
+            message_type, fields = (
                 deserialize_msg(message)
             )
+            client_id, message_id, producer_id, key, *fields = fields
             producer = (client_id, producer_id)
             if self.last_received.get(producer) == key:
                 ack()
