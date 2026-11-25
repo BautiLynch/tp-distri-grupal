@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import random
 import subprocess
+import sys
 import time
 
 DEFAULT_TARGETS = (
@@ -91,4 +92,4 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

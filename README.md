@@ -69,7 +69,7 @@ Con el sistema levantado, en otra terminal:
 make chaos
 ```
 
-Mata workers al azar cada `CHAOS_INTERVAL` segundos para probar la tolerancia a fallas. Se configura con las variables `CHAOS_*` del `Makefile`. Ver [tools/chaos_monkey.md](tools/chaos_monkey.md).
+Mata workers al azar cada `CHAOS_INTERVAL` segundos para probar la tolerancia a fallas. Se configura con las variables `CHAOS_*` del `Makefile`.
 
 ## Escalar
 
