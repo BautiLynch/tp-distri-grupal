@@ -21,6 +21,7 @@ class FilterLanguage:
 
     def __init__(self):
         self.shutdown = GracefulShutdown()
+        self.last_received = {}
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [f"words_{ID}"], consume=True
         )
@@ -34,7 +35,11 @@ class FilterLanguage:
         self.results = MessagePublisher(self.output_exchange, f"{STORAGE_PATH}/filter_language_{ID}.wal")
 
     def process_message(self, message, ack, nack):
-        message_type, client_id, message_id, fields = deserialize_msg(message)
+        message_type, client_id, message_id, producer_id, key, fields = deserialize_msg(message)
+        producer = (client_id, producer_id)
+        if self.last_received.get(producer) == key:
+            ack()
+            return
         if message_type == MsgType.WORD_BATCH:
             language, words = fields
             word_sent = self.words_by_client.setdefault(client_id, {})
@@ -55,6 +60,7 @@ class FilterLanguage:
         else:
             nack()
             return
+        self.last_received[producer] = key
         ack()
 
     def _release_client(self, client_id):

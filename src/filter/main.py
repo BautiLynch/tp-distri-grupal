@@ -24,6 +24,7 @@ YEAR = int(os.environ["YEAR"])
 class FilterYearPlus:
     def __init__(self):
         self.shutdown = GracefulShutdown()
+        self.last_received = {}
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
         )
@@ -49,7 +50,11 @@ class FilterYearPlus:
 
     def process_message(self, message, ack, nack):
         try:
-            message_type, client_id, message_id, fields = deserialize_msg(message)
+            message_type, client_id, message_id, producer_id, key, fields = deserialize_msg(message)
+            producer = (client_id, producer_id)
+            if self.last_received.get(producer) == key:
+                ack()
+                return
             if message_type == MsgType.FILTER_ARTICLE:
                 name, url, language, date_modified, image_url, sections = fields
 
@@ -68,6 +73,7 @@ class FilterYearPlus:
             nack()
             return
 
+        self.last_received[producer] = key
         ack()
 
     def close(self):

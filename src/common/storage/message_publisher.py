@@ -14,7 +14,10 @@ class MessagePublisher:
         record = encode_fields(client_id, key)
         if record in self.sent:
             return
-        message = serialize_msg(message_type, client_id, message_id, *fields)
+        message = serialize_msg(
+            message_type, client_id, message_id, *fields,
+            producer_id=str(self.wal.path), key=key,
+        )
         self.wal.save(record)
         self._publish(message, message_type, client_id, fields)
         self.sent.add(record)

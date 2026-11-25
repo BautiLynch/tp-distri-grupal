@@ -25,6 +25,7 @@ class Average:
 
     def __init__(self):
         self.shutdown = GracefulShutdown()
+        self.last_received = {}
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
         )
@@ -64,7 +65,11 @@ class Average:
         self.urls_by_client.pop(client_id, None)
 
     def process_message(self, message, ack, nack):
-        message_type, client_id, message_id, fields = deserialize_msg(message)
+        message_type, client_id, message_id, producer_id, key, fields = deserialize_msg(message)
+        producer = (client_id, producer_id)
+        if self.last_received.get(producer) == key:
+            ack()
+            return
         if message_type == MsgType.WORD_YEAR_AMOUNT:
             url, date_modified, amount = fields
             urls = self.urls_by_client.setdefault(client_id, {})
@@ -75,6 +80,7 @@ class Average:
         else:
             nack()
             return
+        self.last_received[producer] = key
         ack()
 
     def close(self):

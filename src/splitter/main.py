@@ -23,6 +23,7 @@ if not (AGGREGATION_AMOUNT == FILTER_LANGUAGE_AMOUNT >= 1) or FILTER_YEAR_AMOUNT
 class Splitter:
     def __init__(self):
         self.shutdown = GracefulShutdown()
+        self.last_received = {}
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
         )
@@ -84,7 +85,11 @@ class Splitter:
 
     def process_message(self, message, ack, nack):
         try:
-            message_type, client_id, message_id, fields = deserialize_msg(message)
+            message_type, client_id, message_id, producer_id, key, fields = deserialize_msg(message)
+            producer = (client_id, producer_id)
+            if self.last_received.get(producer) == key:
+                ack()
+                return
             if message_type == MsgType.SPLITTER_ARTICLE:
                 self._split_and_send(client_id, message_id, fields)
 
@@ -98,6 +103,7 @@ class Splitter:
             logging.exception("Could not process splitter input")
             nack()
             return
+        self.last_received[producer] = key
         ack()
 
     def close(self):

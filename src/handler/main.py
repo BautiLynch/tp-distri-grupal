@@ -33,6 +33,7 @@ class ClientHandler:
         self.completed_queries = set()
         self.finished = False
         self.stopping = False
+        self.last_received = {}
 
     def run(self):
         message_type, fields = recv_msg(
@@ -58,9 +59,13 @@ class ClientHandler:
 
     def handle_result(self, message, ack, nack):
         try:
-            message_type, _, message_id, fields = (
+            message_type, client_id, message_id, producer_id, key, fields = (
                 deserialize_msg(message)
             )
+            producer = (client_id, producer_id)
+            if self.last_received.get(producer) == key:
+                ack()
+                return
             if message_type == InternalMsgType.QUERY_END:
                 query_id = QueryId(fields[0])
                 self.query_end_counts[query_id] += 1
@@ -84,6 +89,7 @@ class ClientHandler:
         except Exception:
             nack()
             raise
+        self.last_received[producer] = key
         ack()
         if self.finished:
             self.input_exchange.stop_consuming()

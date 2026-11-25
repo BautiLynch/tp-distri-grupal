@@ -25,12 +25,12 @@ PAYLOAD_SIZE_OFFSET = MESSAGE_ID_OFFSET + MESSAGE_ID_SIZE
 HEADER_SIZE = PAYLOAD_SIZE_OFFSET + UINT32_SIZE
 
 
-def serialize_msg(message_type, client_id, message_id, *fields):
+def serialize_msg(message_type, client_id, message_id, *fields, producer_id="gateway", key=None):
     # Valida que el tipo de mensaje esté definido.
     MsgType(message_type)
     if len(message_id) != MESSAGE_ID_SIZE:
         raise ValueError("Invalid message ID length")
-    payload = encode_fields(*fields)
+    payload = encode_fields(producer_id, message_id if key is None else key, *fields)
     return (
         int(message_type).to_bytes(UINT32_SIZE, "big")
         + client_id.to_bytes(UINT32_SIZE, "big")
@@ -61,5 +61,5 @@ def deserialize_msg(message):
         )
 
     MsgType(message_type)
-    fields = decode_fields(message[HEADER_SIZE:])
-    return message_type, client_id, message_id, fields
+    producer_id, key, *fields = decode_fields(message[HEADER_SIZE:])
+    return message_type, client_id, message_id, producer_id, key, tuple(fields)
