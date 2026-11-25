@@ -117,9 +117,6 @@ class _MessageMiddlewareRabbitMQBase:
             raise _StopConsuming
 
     def close(self):
-        if self._stop_requested:
-            return
-
         try:
             self.chan.close()
             self.conn.close()
@@ -138,8 +135,9 @@ class MessageMiddlewareQueueRabbitMQ(_MessageMiddlewareRabbitMQBase, MessageMidd
 
 
 class MessageMiddlewareExchangeRabbitMQ(_MessageMiddlewareRabbitMQBase, MessageMiddlewareExchange):
-    def __init__(self, host, exchange_name, routing_keys, *, consume):
+    def __init__(self, host, exchange_name, routing_keys, *, consume, queue_name=None):
         self.consume = consume
+        self.fixed_queue_name = queue_name
         super().__init__(host, exchange=exchange_name, routing_keys=routing_keys)
 
     def _declare_topology(self):
@@ -150,7 +148,10 @@ class MessageMiddlewareExchangeRabbitMQ(_MessageMiddlewareRabbitMQBase, MessageM
         if not self.consume:
             return
 
-        result = self.chan.queue_declare(queue="", exclusive=True)
+        if self.fixed_queue_name:
+            result = self.chan.queue_declare(queue=self.fixed_queue_name, durable=True)
+        else:
+            result = self.chan.queue_declare(queue="", exclusive=True)
         self.queue_name = result.method.queue
         for routing_key in self.routing_keys:
             self.chan.queue_bind(

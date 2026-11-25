@@ -61,6 +61,16 @@ make down
 
 Ejecutá `make verify` cuando hayan terminado los clientes.
 
+### Chaos monkey
+
+Con el sistema levantado, en otra terminal:
+
+```bash
+make chaos
+```
+
+Mata workers al azar cada `CHAOS_INTERVAL` segundos para probar la tolerancia a fallas. Se configura con las variables `CHAOS_*` del `Makefile`.
+
 ## Escalar
 
 Para cambiar la cantidad de instancias de un worker o de clientes:

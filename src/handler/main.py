@@ -58,9 +58,10 @@ class ClientHandler:
 
     def handle_result(self, message, ack, nack):
         try:
-            message_type, _, fields = (
+            message_type, fields = (
                 deserialize_msg(message)
             )
+            _, *fields = fields
             if message_type == InternalMsgType.QUERY_END:
                 query_id = QueryId(fields[0])
                 self.query_end_counts[query_id] += 1

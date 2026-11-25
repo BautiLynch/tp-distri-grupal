@@ -1,13 +1,17 @@
 import os
+import socket
 import logging
 import sys
 
 from common import middleware, hashing
+from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
 from common.message_protocol.internal import MsgType, serialize_msg, deserialize_msg
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
+HEARTBEAT_QUEUE = os.environ["HEARTBEAT_QUEUE"]
+HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 
@@ -21,9 +25,12 @@ if not (AGGREGATION_AMOUNT == FILTER_LANGUAGE_AMOUNT >= 1) or FILTER_YEAR_AMOUNT
 
 class Splitter:
     def __init__(self):
+        self.heartbeat = HeartbeatSender(
+            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"splitter_{ID}", HEARTBEAT_INTERVAL
+        )
         self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
+            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True, queue_name=f"splitter_{ID}"
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, OUTPUT_EXCHANGE,
@@ -76,7 +83,8 @@ class Splitter:
 
     def process_message(self, message, ack, nack):
         try:
-            message_type, client_id, fields = deserialize_msg(message)
+            message_type, fields = deserialize_msg(message)
+            client_id, *fields = fields
             if message_type == MsgType.SPLITTER_ARTICLE:
                 self._split_and_send(client_id, fields)
 
@@ -93,6 +101,7 @@ class Splitter:
         ack()
 
     def close(self):
+        self.heartbeat.stop()
         for mom in [self.input_exchange, self.output_exchange]:
             try:
                 mom.close()
@@ -100,6 +109,7 @@ class Splitter:
                 logging.error(f"Error closing message middleware: {e}")
 
     def start(self):
+        self.heartbeat.start()
         self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 def main():

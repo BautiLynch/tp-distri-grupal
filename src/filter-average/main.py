@@ -1,15 +1,19 @@
 from datetime import datetime
 import os
+import socket
 import logging
 import sys
 
 from common import middleware
+from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
 from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
 from common.message_protocol.queries import QueryId
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
+HEARTBEAT_QUEUE = os.environ["HEARTBEAT_QUEUE"]
+HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 
@@ -22,9 +26,12 @@ YEAR = int(os.environ["YEAR"])
 class FilterAverage:
 
     def __init__(self):
+        self.heartbeat = HeartbeatSender(
+            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"filter_average_{ID}", HEARTBEAT_INTERVAL
+        )
         self.shutdown = GracefulShutdown()
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
+            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True, queue_name=f"filter_average_{ID}"
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ( 
             MOM_HOST, OUTPUT_EXCHANGE, [], consume=False
@@ -71,7 +78,8 @@ class FilterAverage:
             self.output_exchange.send_to(serialize_msg(MsgType.RESULT, client_id, QueryId.Q5, url, amount_words), routing_key=client_id)
 
     def process_message(self, message, ack, nack):
-        message_type, client_id, fields = deserialize_msg(message)
+        message_type, fields = deserialize_msg(message)
+        client_id, *fields = fields
         if message_type == MsgType.WORD_YEAR_AMOUNT:
             url, date_modified, amount = fields
 
@@ -90,6 +98,7 @@ class FilterAverage:
         ack()
 
     def close(self):
+        self.heartbeat.stop()
         for mom in [self.input_exchange, self.output_exchange]:
             try:
                 mom.close()
@@ -97,6 +106,7 @@ class FilterAverage:
                 logging.error(f"Error closing message middleware: {e}")
 
     def start(self):
+        self.heartbeat.start()
         self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 def main():

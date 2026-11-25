@@ -121,7 +121,7 @@ def scale_config(config, target, amount):
         elif name == "gateway":
             dependencies = tuple(
                 dependency for dependency in services
-                if dependency != "gateway" and not dependency.startswith("client_")
+                if dependency != "gateway" and not dependency.startswith(("client_", "monitor_"))
             )
         elif group_of(name) in WORKERS or name in ("handler", "join"):
             dependencies = ("rabbitmq",)
