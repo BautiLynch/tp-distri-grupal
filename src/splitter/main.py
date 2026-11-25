@@ -6,7 +6,8 @@ import sys
 from common import middleware, hashing
 from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
-from common.message_protocol.internal import MsgType, serialize_msg, deserialize_msg
+from common.storage.message_publisher import MessagePublisher
+from common.message_protocol.internal import MsgType, deserialize_msg
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
@@ -29,6 +30,7 @@ class Splitter:
             MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"splitter_{ID}", HEARTBEAT_INTERVAL
         )
         self.shutdown = GracefulShutdown()
+        self.last_received = {}
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [ID], consume=True, queue_name=f"splitter_{ID}"
         )
@@ -38,7 +40,20 @@ class Splitter:
             + [f"urls_{index}" for index in range(FILTER_YEAR_AMOUNT)], consume=False
         )
 
+        self.publisher = MessagePublisher(
+            self.output_exchange, f"storage/splitter_{ID}.wal", get_routing_key=self._routing_key
+        )
         self.stopwords = self._load_stopwords("english") | self._load_stopwords("french")
+
+    def _routing_key(self, message_type, client_id, fields):
+        if message_type == MsgType.WORD_BATCH:
+            word = fields[1][0]
+            key = hashing.get_hash_key(f"{client_id}_{word}", FILTER_LANGUAGE_AMOUNT)
+            return f"words_{key}"
+        if message_type == MsgType.WORD_YEAR_AMOUNT:
+            key = hashing.get_hash_key(f"{client_id}_{fields[0]}", FILTER_YEAR_AMOUNT)
+            return f"urls_{key}"
+        return None
 
     def _load_stopwords(self, language):
         file_path = os.path.join(STOPWORDS_PATH, f"{language}.txt")
@@ -47,7 +62,7 @@ class Splitter:
 
         return set(stopwords_list)
 
-    def _split_and_send(self, client_id, article):
+    def _split_and_send(self, client_id, message_id, article, source):
         url, language, date_modified, abstract = article
         text = "".join(char if char.isalnum() or char == "_" else " "
                        for char in abstract.lower())
@@ -69,27 +84,25 @@ class Splitter:
         for key, batch in batches.items():
             if self.shutdown.requested.is_set():
                 break
-            self.output_exchange.send_to(
-                serialize_msg(MsgType.WORD_BATCH, client_id, language, batch),
-                routing_key=f"words_{key}",
-            )
+            self.publisher.send(MsgType.WORD_BATCH, client_id, message_id, (message_id, MsgType.WORD_BATCH, key), source, language, batch)
         if word_count:
-            key = hashing.get_hash_key(f"{client_id}_{url}", FILTER_YEAR_AMOUNT)
-            self.output_exchange.send_to(
-                serialize_msg(MsgType.WORD_YEAR_AMOUNT, client_id,
-                              url, date_modified, sum(word_count.values())),
-                routing_key=f"urls_{key}",
+            self.publisher.send(
+                MsgType.WORD_YEAR_AMOUNT, client_id, message_id, (message_id, MsgType.WORD_YEAR_AMOUNT), source, url, date_modified, sum(word_count.values())
             )
 
     def process_message(self, message, ack, nack):
         try:
             message_type, fields = deserialize_msg(message)
-            client_id, *fields = fields
+            client_id, message_id, producer_id, key, *fields = fields
+            producer = (client_id, producer_id)
+            if self.last_received.get(producer) == key:
+                ack()
+                return
             if message_type == MsgType.SPLITTER_ARTICLE:
-                self._split_and_send(client_id, fields)
+                self._split_and_send(client_id, message_id, fields, source=(producer_id, key))
 
             elif message_type == MsgType.END_OF_RECORDS:
-                self.output_exchange.send(message)
+                self.publisher.send(message_type, client_id, message_id, (message_id, message_type), (producer_id, key), f"splitter_{ID}")
 
             else:
                 raise ValueError(f"Unexpected splitter message type: {message_type}")
@@ -97,19 +110,25 @@ class Splitter:
         except Exception:
             logging.exception("Could not process splitter input")
             nack()
-            return
+            raise
+        self.last_received[producer] = key
         ack()
 
     def close(self):
         self.heartbeat.stop()
-        for mom in [self.input_exchange, self.output_exchange]:
+        for mom in [self.input_exchange, self.output_exchange, self.publisher]:
             try:
                 mom.close()
             except Exception as e:
                 logging.error(f"Error closing message middleware: {e}")
 
     def start(self):
-        self.heartbeat.start()
+        try:
+            self.publisher.recover()
+            self.heartbeat.start()
+        except Exception:
+            self.close()
+            raise
         self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 def main():

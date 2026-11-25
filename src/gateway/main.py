@@ -4,6 +4,7 @@ import os
 import signal
 import socket
 import sys
+from uuid import uuid4
 
 from common import middleware, message_protocol
 
@@ -52,22 +53,25 @@ def handle_client_request(client_socket, client_id, client_dict, sigterm_receive
             if message_type == message_protocol.external.MsgType.ARTICLE:
                 article, = fields
                 filtered_article, splitter_article = preprocess_article(parse_article(article))
+                message_id = uuid4().bytes
                 filtered = message_protocol.internal.serialize_msg(
                     message_protocol.internal.MsgType.FILTER_ARTICLE,
-                    client_id, *filtered_article,
+                    client_id, message_id, "gateway", message_id, *filtered_article,
                 )
                 filter_exchange.send_to(filtered, str(article_index % FILTER_AMOUNT))
                 if splitter_article is not None:
+                    message_id = uuid4().bytes
                     split = message_protocol.internal.serialize_msg(
                         message_protocol.internal.MsgType.SPLITTER_ARTICLE,
-                        client_id, *splitter_article,
+                        client_id, message_id, "gateway", message_id, *splitter_article,
                     )
                     splitter_exchange.send_to(split, str(article_index % SPLITTER_AMOUNT))
                 article_index += 1
             else:
+                message_id = uuid4().bytes
                 end_of_records = message_protocol.internal.serialize_msg(
                     message_protocol.internal.MsgType.END_OF_RECORDS,
-                    client_id,
+                    client_id, message_id, "gateway", message_id,
                 )
                 filter_exchange.send(end_of_records)
                 splitter_exchange.send(end_of_records)

@@ -7,7 +7,8 @@ from datetime import datetime
 from common import middleware, hashing
 from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
-from common.message_protocol.internal import deserialize_msg, MsgType, serialize_msg
+from common.storage.message_publisher import MessagePublisher
+from common.message_protocol.internal import deserialize_msg, MsgType
 from common.message_protocol.queries import QueryId
 
 ID = os.environ["ID"]
@@ -32,6 +33,7 @@ class FilterYearPlus:
         )
 
         self.shutdown = GracefulShutdown()
+        self.last_received = {}
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [ID], consume=True, queue_name=f"filter_{ID}"
         )
@@ -43,46 +45,63 @@ class FilterYearPlus:
         )
 
         self.sections = {section.lower() for section in SECTIONS}
+        self.results = MessagePublisher(self.output_exchange, f"storage/filter_{ID}.wal")
+        self.images = MessagePublisher(
+            self.output_exchange_image, f"storage/filter_{ID}_images.wal",
+            get_routing_key=self._image_routing_key,
+        )
+
+    def _image_routing_key(self, message_type, client_id, fields):
+        if message_type == MsgType.GET_IMAGE:
+            url = fields[0]
+            return hashing.get_hash_key(f"{client_id}_{url}", IMAGE_GETTER_AMOUNT)
+        return None
 
     def process_message(self, message, ack, nack):
         try:
             message_type, fields = deserialize_msg(message)
-            client_id, *fields = fields
+            client_id, message_id, producer_id, key, *fields = fields
+            producer = (client_id, producer_id)
+            if self.last_received.get(producer) == key:
+                ack()
+                return
             if message_type == MsgType.FILTER_ARTICLE:
                 name, url, language, date_modified, image_url, sections = fields
 
                 if datetime.fromisoformat(date_modified.replace("Z", "+00:00")).year <= YEAR:
                     if language.lower() == LANGUAGE.lower():
-                        self.output_exchange.send_to(serialize_msg(MsgType.RESULT, client_id, QueryId.Q1, url, date_modified), routing_key=client_id)
+                        self.results.send(MsgType.RESULT, client_id, message_id, (message_id, MsgType.RESULT), (producer_id, key), QueryId.Q1, url, date_modified)
 
                     if self.sections.intersection(section.lower() for section in sections):
-                        key = hashing.get_hash_key(f"{client_id}_{url}", IMAGE_GETTER_AMOUNT)
-                        self.output_exchange_image.send_to(
-                            serialize_msg(MsgType.GET_IMAGE, client_id, url, name, image_url),
-                            routing_key=key,
-                        )
-            
-            elif message_type == MsgType.END_OF_RECORDS:
-                self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, QueryId.Q1), routing_key=client_id)
-                self.output_exchange_image.send(serialize_msg(MsgType.END_OF_RECORDS, client_id))
+                        self.images.send(MsgType.GET_IMAGE, client_id, message_id, (message_id, MsgType.GET_IMAGE), (producer_id, key), url, name, image_url)
 
+            elif message_type == MsgType.END_OF_RECORDS:
+                self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), (producer_id, key), QueryId.Q1)
+                self.images.send(MsgType.END_OF_RECORDS, client_id, message_id, (message_id, MsgType.END_OF_RECORDS), (producer_id, key), f"filter_{ID}")
         except Exception:
             logging.exception("Error processing message")
             nack()
-            return
+            raise
 
+        self.last_received[producer] = key
         ack()
 
     def close(self):
         self.heartbeat.stop()
-        for mom in [self.input_exchange, self.output_exchange, self.output_exchange_image]:
+        for resource in (self.input_exchange, self.output_exchange, self.output_exchange_image, self.results, self.images):
             try:
-                mom.close()
-            except Exception as e:
-                logging.error(f"Error closing message middleware: {e}")
+                resource.close()
+            except Exception:
+                logging.exception("Error closing filter resource")
 
     def start(self):
-        self.heartbeat.start()
+        try:
+            self.results.recover()
+            self.images.recover()
+            self.heartbeat.start()
+        except Exception:
+            self.close()
+            raise
         self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 

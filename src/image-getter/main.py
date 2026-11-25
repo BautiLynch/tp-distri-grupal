@@ -1,15 +1,17 @@
 import os
 import socket
 import logging
+import sys
 import time
 import urllib.error
 import urllib.request
-import sys
 
 from common import middleware
 from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
-from common.message_protocol.internal import deserialize_msg, MsgType, serialize_msg
+from common.storage.eof_counter import EofCounter
+from common.storage.message_publisher import MessagePublisher
+from common.message_protocol.internal import deserialize_msg, MsgType
 from common.message_protocol.queries import QueryId
 
 ID = os.environ["ID"]
@@ -32,6 +34,7 @@ class ImageGetter:
             MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"image_getter_{ID}", HEARTBEAT_INTERVAL
         )
         self.shutdown = GracefulShutdown()
+        self.last_received = {}
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [ID], consume=True, queue_name=f"image_getter_{ID}"
         )
@@ -39,25 +42,29 @@ class ImageGetter:
             MOM_HOST, OUTPUT_EXCHANGE, [], consume=False
         )
 
-        self.eof_by_client = {}
+        self.results = MessagePublisher(self.output_exchange, f"storage/image_getter_{ID}.wal")
+        self.eofs = EofCounter(f"storage/image_getter_{ID}_eofs", FILTER_YEAR_PLUS_AMOUNT)
         self.rate_limited_until = 0
 
-    def _get_image(self, client_id, name, url, image_url):
+    def _get_image(self, image_url):
         if not image_url or time.time() < self.rate_limited_until:
-            self.output_exchange.send_to(serialize_msg(MsgType.RESULT, client_id, QueryId.Q2, name, url, b""), routing_key=client_id)
-            return
+            return b""
 
         request = urllib.request.Request(image_url, headers={"User-Agent": IMAGE_USER_AGENT})
         with urllib.request.urlopen(request, timeout=IMAGE_TIMEOUT) as response:
-            self.output_exchange.send_to(serialize_msg(MsgType.RESULT, client_id, QueryId.Q2, name, url, response.read()), routing_key=client_id)
+            return response.read()
 
     def process_message(self, message, ack, nack):
         message_type, fields = deserialize_msg(message)
-        client_id, *fields = fields
+        client_id, message_id, producer_id, key, *fields = fields
+        producer = (client_id, producer_id)
+        if self.last_received.get(producer) == key:
+            ack()
+            return
         if message_type == MsgType.GET_IMAGE:
             url, name, image_url = fields
             try:
-                self._get_image(client_id, name, url, image_url)
+                image = self._get_image(image_url)
             except Exception as error:
                 status_code = getattr(error, "code", None)
                 logging.debug(
@@ -77,33 +84,39 @@ class ImageGetter:
                         delay = IMAGE_RATE_LIMIT_DELAY
                     self.rate_limited_until = time.time() + delay
                     logging.debug("Wikimedia returned 429; skipping downloads for %s seconds", delay)
-                self.output_exchange.send_to(serialize_msg(MsgType.RESULT, client_id, QueryId.Q2, name, url, b""), routing_key=client_id)
+                image = b""
+            self.results.send(MsgType.RESULT, client_id, message_id, (message_id, MsgType.RESULT), (producer_id, key), QueryId.Q2, name, url, image)
 
         elif message_type == MsgType.END_OF_RECORDS:
-            self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
-            if self.eof_by_client[client_id] == FILTER_YEAR_PLUS_AMOUNT:
-                self.output_exchange.send_to(serialize_msg(MsgType.QUERY_END, client_id, QueryId.Q2), routing_key=client_id)
-                self._release_client(client_id)
+            count = self.eofs.save(client_id, (message_id, fields[0]))
+            if count == FILTER_YEAR_PLUS_AMOUNT:
+                self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), (producer_id, key), QueryId.Q2)
+                self.eofs.clear(client_id)
 
         else:
             nack()
             return
+        self.last_received[producer] = key
         ack()
-
-    def _release_client(self, client_id):
-        self.eof_by_client.pop(client_id, None)
 
     def close(self):
         self.heartbeat.stop()
-        for mom in [self.input_exchange, self.output_exchange]:
+        for resource in (self.input_exchange, self.output_exchange, self.results, self.eofs):
             try:
-                mom.close()
-            except Exception as e:
-                logging.error(f"Error closing message middleware: {e}")
+                resource.close()
+            except Exception:
+                logging.exception("Error closing image getter resource")
 
     def start(self):
-        self.heartbeat.start()
+        try:
+            self.eofs.recover()
+            self.results.recover()
+            self.heartbeat.start()
+        except Exception:
+            self.close()
+            raise
         self.shutdown.run(self.input_exchange, self.process_message, self.close)
+
 
 def main():
     logging.basicConfig(

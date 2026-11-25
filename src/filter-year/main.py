@@ -7,7 +7,9 @@ from datetime import datetime
 from common import middleware, hashing
 from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
-from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
+from common.storage.message_publisher import MessagePublisher
+from common.storage.eof_counter import EofCounter
+from common.message_protocol.internal import deserialize_msg, MsgType
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
@@ -30,6 +32,7 @@ class FilterYear:
             MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"filter_year_{ID}", HEARTBEAT_INTERVAL
         )
         self.shutdown = GracefulShutdown()
+        self.last_received = {}
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [f"urls_{ID}"], consume=True, queue_name=f"filter_year_{ID}"
         )
@@ -40,50 +43,69 @@ class FilterYear:
             MOM_HOST, FILTER_AVERAGE_EXCHANGE, [f"{index}" for index in range(FILTER_AVERAGE_AMOUNT)], consume=False
         )
 
-        self.eof_by_client = {}
+        self.averages = MessagePublisher(
+            self.output_exchange_average, f"{STORAGE_PATH}/filter_year_{ID}_average.wal",
+            get_routing_key=self._average_routing_key,
+        )
+        self.baselines = MessagePublisher(
+            self.output_exchange_filter_average, f"{STORAGE_PATH}/filter_year_{ID}_baseline.wal",
+            get_routing_key=lambda message_type, client_id, fields: None,
+        )
+        self.eofs = EofCounter(f"{STORAGE_PATH}/filter_year_{ID}_eofs", SPLITTER_AMOUNT)
+
+    def _average_routing_key(self, message_type, client_id, fields):
+        if message_type == MsgType.WORD_YEAR_AMOUNT:
+            return hashing.get_hash_key(f"{client_id}_{fields[0]}", AVERAGE_AMOUNT)
+        return None
 
     def process_message(self, message, ack, nack):
         message_type, fields = deserialize_msg(message)
-        client_id, *fields = fields
+        client_id, message_id, producer_id, key, *fields = fields
+        producer = (client_id, producer_id)
+        if self.last_received.get(producer) == key:
+            ack()
+            return
         if message_type == MsgType.WORD_YEAR_AMOUNT:
             url, date_modified, amount = fields
             
             # Los articulos hasta YEAR alimentan el promedio en todos los filtros.
             if datetime.fromisoformat(date_modified.replace("Z", "+00:00")).year <= YEAR:
-                self.output_exchange_filter_average.send(message)
+                self.baselines.send(message_type, client_id, message_id, (message_id, message_type), (producer_id, key), *fields)
             # Los posteriores se acumulan por URL en un unico Average.
             else:
-                key = hashing.get_hash_key(f"{client_id}_{url}", AVERAGE_AMOUNT)
-                self.output_exchange_average.send_to(message, routing_key=key)
+                self.averages.send(message_type, client_id, message_id, (message_id, message_type), (producer_id, key), *fields)
 
         elif message_type == MsgType.END_OF_RECORDS:
-            self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
+            count = self.eofs.save(client_id, (message_id, fields[0]))
 
-            if self.eof_by_client[client_id] == SPLITTER_AMOUNT:
-                self.output_exchange_filter_average.send(
-                    serialize_msg(MsgType.BASELINE_END, client_id)
-                )
-                self.output_exchange_average.send(message)
-                self._release_client(client_id)
+            if count == SPLITTER_AMOUNT:
+                self.baselines.send(MsgType.BASELINE_END, client_id, message_id, (message_id, MsgType.BASELINE_END), (producer_id, key), f"filter_year_{ID}")
+                self.averages.send(message_type, client_id, message_id, (message_id, message_type), (producer_id, key), f"filter_year_{ID}")
+                self.eofs.clear(client_id)
 
         else:
             nack()
             return
+        self.last_received[producer] = key
         ack()
-
-    def _release_client(self, client_id):
-        self.eof_by_client.pop(client_id, None)
 
     def close(self):
         self.heartbeat.stop()
-        for mom in [self.input_exchange, self.output_exchange_average, self.output_exchange_filter_average]:
+        for mom in [self.input_exchange, self.output_exchange_average, self.output_exchange_filter_average, self.averages, self.baselines, self.eofs]:
             try:
                 mom.close()
             except Exception as e:
                 logging.error(f"Error closing message middleware: {e}")
 
     def start(self):
-        self.heartbeat.start()
+        try:
+            self.eofs.recover()
+            self.baselines.recover()
+            self.averages.recover()
+            self.heartbeat.start()
+        except Exception:
+            self.close()
+            raise
         self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 def main():

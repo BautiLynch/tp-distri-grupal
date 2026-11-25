@@ -7,7 +7,9 @@ import sys
 from common import middleware, storage, hashing
 from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
-from common.message_protocol.internal import deserialize_msg, serialize_msg, MsgType
+from common.storage.message_publisher import MessagePublisher
+from common.storage.eof_counter import EofCounter
+from common.message_protocol.internal import deserialize_msg, MsgType
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
@@ -30,6 +32,7 @@ class Average:
             MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"average_{ID}", HEARTBEAT_INTERVAL
         )
         self.shutdown = GracefulShutdown()
+        self.last_received = {}
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [ID], consume=True, queue_name=f"average_{ID}"
         )
@@ -38,55 +41,72 @@ class Average:
         )
 
         self.urls_by_client = {}
-        self.eof_by_client = {}
+        self.eofs = EofCounter(f"{STORAGE_PATH}/average_{ID}_eofs", FILTER_YEAR_AMOUNT)
         self.storage = storage.Storage(STORAGE_PATH)
+        self.results = MessagePublisher(
+            self.output_exchange, f"{STORAGE_PATH}/average_{ID}.wal",
+            get_routing_key=self._routing_key,
+        )
 
-    def _process_eof(self, client_id):
-        self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
-        if self.eof_by_client[client_id] != FILTER_YEAR_AMOUNT:
-            return 
+    def _routing_key(self, message_type, client_id, fields):
+        if message_type == MsgType.WORD_YEAR_AMOUNT:
+            return hashing.get_hash_key(f"{client_id}_{fields[0]}", FILTER_AVERAGE_AMOUNT)
+        return None
+
+    def _process_eof(self, client_id, message_id, sender_id, source):
+        count = self.eofs.save(client_id, (message_id, sender_id))
+        if count != FILTER_YEAR_AMOUNT:
+            return
 
         date = datetime(YEAR, 1, 1)
         formatted_date = date.isoformat()
         
         for url, amount in self.urls_by_client.get(client_id, {}).items():
-            key = hashing.get_hash_key(f"{client_id}_{url}", FILTER_AVERAGE_AMOUNT)
-            self.output_exchange.send_to(
-                serialize_msg(MsgType.WORD_YEAR_AMOUNT, client_id, url, formatted_date, amount), routing_key=key
-            )
+            self.results.send(MsgType.WORD_YEAR_AMOUNT, client_id, message_id, (url, MsgType.WORD_YEAR_AMOUNT), source, url, formatted_date, amount)
         
-        self.output_exchange.send(serialize_msg(MsgType.END_OF_RECORDS, client_id))
+        self.results.send(MsgType.END_OF_RECORDS, client_id, message_id, (message_id, MsgType.END_OF_RECORDS), source, f"average_{ID}")
         self._release_client(client_id)
 
     def _release_client(self, client_id):
-        self.eof_by_client.pop(client_id, None)
+        self.eofs.clear(client_id)
         self.urls_by_client.pop(client_id, None)
 
     def process_message(self, message, ack, nack):
         message_type, fields = deserialize_msg(message)
-        client_id, *fields = fields
+        client_id, message_id, producer_id, key, *fields = fields
+        producer = (client_id, producer_id)
+        if self.last_received.get(producer) == key:
+            ack()
+            return
         if message_type == MsgType.WORD_YEAR_AMOUNT:
             url, date_modified, amount = fields
             urls = self.urls_by_client.setdefault(client_id, {})
             urls[url] = urls.get(url, 0) + amount
 
         elif message_type == MsgType.END_OF_RECORDS:
-            self._process_eof(client_id)
+            self._process_eof(client_id, message_id, fields[0], source=(producer_id, key))
         else:
             nack()
             return
+        self.last_received[producer] = key
         ack()
 
     def close(self):
         self.heartbeat.stop()
-        for mom in [self.input_exchange, self.output_exchange]:
+        for mom in [self.input_exchange, self.output_exchange, self.results, self.eofs]:
             try:
                 mom.close()
             except Exception as e:
                 logging.error(f"Error closing message middleware: {e}")
 
     def start(self):
-        self.heartbeat.start()
+        try:
+            self.eofs.recover()
+            self.results.recover()
+            self.heartbeat.start()
+        except Exception:
+            self.close()
+            raise
         self.shutdown.run(self.input_exchange, self.process_message, self.close)
 
 def main():
