@@ -1,4 +1,5 @@
 import os
+import socket
 import logging
 import sys
 import time
@@ -6,6 +7,7 @@ import urllib.error
 import urllib.request
 
 from common import middleware
+from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
 from common.storage.eof_counter import EofCounter
 from common.storage.message_publisher import MessagePublisher
@@ -14,6 +16,8 @@ from common.message_protocol.queries import QueryId
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
+HEARTBEAT_QUEUE = os.environ["HEARTBEAT_QUEUE"]
+HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 FILTER_YEAR_PLUS_AMOUNT = int(os.environ["FILTER_YEAR_PLUS_AMOUNT"])
@@ -26,10 +30,13 @@ IMAGE_RATE_LIMIT_DELAY = 60
 
 class ImageGetter:
     def __init__(self):
+        self.heartbeat = HeartbeatSender(
+            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"image_getter_{ID}", HEARTBEAT_INTERVAL
+        )
         self.shutdown = GracefulShutdown()
         self.last_received = {}
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
+            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True, queue_name=f"image_getter_{ID}"
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, OUTPUT_EXCHANGE, [], consume=False
@@ -92,6 +99,7 @@ class ImageGetter:
         ack()
 
     def close(self):
+        self.heartbeat.stop()
         for resource in (self.input_exchange, self.output_exchange, self.results, self.eofs):
             try:
                 resource.close()
@@ -102,6 +110,7 @@ class ImageGetter:
         try:
             self.eofs.recover()
             self.results.recover()
+            self.heartbeat.start()
         except Exception:
             self.close()
             raise

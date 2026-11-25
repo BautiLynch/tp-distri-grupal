@@ -1,9 +1,11 @@
-from datetime import datetime
 import os
 import logging
+import socket
 import sys
 
+from datetime import datetime
 from common import middleware, hashing
+from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
 from common.storage.message_publisher import MessagePublisher
 from common.message_protocol.internal import deserialize_msg, MsgType
@@ -11,6 +13,8 @@ from common.message_protocol.queries import QueryId
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
+HEARTBEAT_QUEUE = os.environ["HEARTBEAT_QUEUE"]
+HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 OUTPUT_EXCHANGE_1 = os.environ["OUTPUT_EXCHANGE_1"]
 OUTPUT_EXCHANGE_2 = os.environ["OUTPUT_EXCHANGE_2"]
@@ -23,10 +27,15 @@ YEAR = int(os.environ["YEAR"])
 
 class FilterYearPlus:
     def __init__(self):
+
+        self.heartbeat = HeartbeatSender(
+            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"filter_{ID}", HEARTBEAT_INTERVAL
+        )
+
         self.shutdown = GracefulShutdown()
         self.last_received = {}
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
+            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True, queue_name=f"filter_{ID}"
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ( 
             MOM_HOST, OUTPUT_EXCHANGE_1, [], consume=False
@@ -77,6 +86,7 @@ class FilterYearPlus:
         ack()
 
     def close(self):
+        self.heartbeat.stop()
         for resource in (self.input_exchange, self.output_exchange, self.output_exchange_image, self.results, self.images):
             try:
                 resource.close()
@@ -87,6 +97,7 @@ class FilterYearPlus:
         try:
             self.results.recover()
             self.images.recover()
+            self.heartbeat.start()
         except Exception:
             self.close()
             raise

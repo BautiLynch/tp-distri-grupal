@@ -1,8 +1,10 @@
 import os
+import socket
 import logging
 import sys
 
 from common import middleware
+from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
 from common.storage.message_publisher import MessagePublisher
 from common.storage.eof_counter import EofCounter
@@ -11,6 +13,8 @@ from common.message_protocol.queries import QueryId
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
+HEARTBEAT_QUEUE = os.environ["HEARTBEAT_QUEUE"]
+HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
@@ -20,10 +24,13 @@ SPLITTER_AMOUNT = int(os.environ["SPLITTER_AMOUNT"])
 class FilterLanguage:
 
     def __init__(self):
+        self.heartbeat = HeartbeatSender(
+            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"filter_language_{ID}", HEARTBEAT_INTERVAL
+        )
         self.shutdown = GracefulShutdown()
         self.last_received = {}
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [f"words_{ID}"], consume=True
+            MOM_HOST, INPUT_EXCHANGE, [f"words_{ID}"], consume=True, queue_name=f"filter_language_{ID}"
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ( 
             MOM_HOST, OUTPUT_EXCHANGE, [], consume=False
@@ -68,6 +75,7 @@ class FilterLanguage:
         self.words_by_client.pop(client_id, None)
 
     def close(self):
+        self.heartbeat.stop()
         for mom in [self.input_exchange, self.output_exchange, self.results, self.eofs]:
             try:
                 mom.close()
@@ -78,6 +86,7 @@ class FilterLanguage:
         try:
             self.eofs.recover()
             self.results.recover()
+            self.heartbeat.start()
         except Exception:
             self.close()
             raise

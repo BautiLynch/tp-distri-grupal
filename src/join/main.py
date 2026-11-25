@@ -1,8 +1,10 @@
 import os
+import socket
 import logging
 import sys
 
 from common import middleware
+from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
 from common.storage.message_publisher import MessagePublisher
 from common.storage.eof_counter import EofCounter
@@ -11,6 +13,8 @@ from common.message_protocol.internal import deserialize_msg, MsgType
 from common.message_protocol.queries import QueryId
 
 MOM_HOST = os.environ["MOM_HOST"]
+HEARTBEAT_QUEUE = os.environ["HEARTBEAT_QUEUE"]
+HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 INPUT_QUEUE = os.environ["INPUT_QUEUE"]
 OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 AGGREGATION_AMOUNT = int(os.environ["AGGREGATION_AMOUNT"])
@@ -19,6 +23,9 @@ TOP_SIZE = int(os.environ["TOP_SIZE"])
 class JoinFilter:
 
     def __init__(self):
+        self.heartbeat = HeartbeatSender(
+            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), "join", HEARTBEAT_INTERVAL
+        )
         self.shutdown = GracefulShutdown()
         self.last_received = {}
         self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
@@ -83,6 +90,7 @@ class JoinFilter:
         ack()
 
     def close(self):
+        self.heartbeat.stop()
         for mom in [self.input_queue, self.output_exchange, self.results, self.eofs]:
             try:
                 mom.close()
@@ -93,6 +101,7 @@ class JoinFilter:
         try:
             self.eofs.recover()
             self.results.recover()
+            self.heartbeat.start()
         except Exception:
             self.close()
             raise

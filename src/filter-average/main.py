@@ -1,9 +1,11 @@
 from datetime import datetime
 import os
+import socket
 import logging
 import sys
 
 from common import middleware
+from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
 from common.storage.message_publisher import MessagePublisher
 from common.storage.eof_counter import EofCounter
@@ -12,6 +14,8 @@ from common.message_protocol.queries import QueryId
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
+HEARTBEAT_QUEUE = os.environ["HEARTBEAT_QUEUE"]
+HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
 
@@ -24,10 +28,13 @@ YEAR = int(os.environ["YEAR"])
 class FilterAverage:
 
     def __init__(self):
+        self.heartbeat = HeartbeatSender(
+            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"filter_average_{ID}", HEARTBEAT_INTERVAL
+        )
         self.shutdown = GracefulShutdown()
         self.last_received = {}
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True
+            MOM_HOST, INPUT_EXCHANGE, [ID], consume=True, queue_name=f"filter_average_{ID}"
         )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ( 
             MOM_HOST, OUTPUT_EXCHANGE, [], consume=False
@@ -104,6 +111,7 @@ class FilterAverage:
         ack()
 
     def close(self):
+        self.heartbeat.stop()
         for mom in [self.input_exchange, self.output_exchange, self.results, self.eofs, self.baseline_eofs]:
             try:
                 mom.close()
@@ -115,6 +123,7 @@ class FilterAverage:
             self.eofs.recover()
             self.baseline_eofs.recover()
             self.results.recover()
+            self.heartbeat.start()
         except Exception:
             self.close()
             raise

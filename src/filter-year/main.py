@@ -1,9 +1,11 @@
 import os
+import socket
 import logging
 import sys
 
 from datetime import datetime
 from common import middleware, hashing
+from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
 from common.storage.message_publisher import MessagePublisher
 from common.storage.eof_counter import EofCounter
@@ -11,6 +13,8 @@ from common.message_protocol.internal import deserialize_msg, MsgType
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
+HEARTBEAT_QUEUE = os.environ["HEARTBEAT_QUEUE"]
+HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 AVERAGE_EXCHANGE = os.environ["AVERAGE_EXCHANGE"]
 AVERAGE_AMOUNT = int(os.environ.get("AVERAGE_AMOUNT"))
@@ -24,10 +28,13 @@ YEAR = int(os.environ.get("YEAR"))
 class FilterYear:
 
     def __init__(self):
+        self.heartbeat = HeartbeatSender(
+            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"filter_year_{ID}", HEARTBEAT_INTERVAL
+        )
         self.shutdown = GracefulShutdown()
         self.last_received = {}
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [f"urls_{ID}"], consume=True
+            MOM_HOST, INPUT_EXCHANGE, [f"urls_{ID}"], consume=True, queue_name=f"filter_year_{ID}"
         )
         self.output_exchange_average = middleware.MessageMiddlewareExchangeRabbitMQ( 
             MOM_HOST, AVERAGE_EXCHANGE, [f"{index}" for index in range(AVERAGE_AMOUNT)], consume=False
@@ -82,6 +89,7 @@ class FilterYear:
         ack()
 
     def close(self):
+        self.heartbeat.stop()
         for mom in [self.input_exchange, self.output_exchange_average, self.output_exchange_filter_average, self.averages, self.baselines, self.eofs]:
             try:
                 mom.close()
@@ -93,6 +101,7 @@ class FilterYear:
             self.eofs.recover()
             self.baselines.recover()
             self.averages.recover()
+            self.heartbeat.start()
         except Exception:
             self.close()
             raise

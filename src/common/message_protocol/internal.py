@@ -15,26 +15,22 @@ class MsgType(IntEnum):
     BASELINE_END = auto()
     WORD_BATCH = auto()
     HEARTBEAT = auto()
+    GOSSIP = auto()
+    ELECTION = auto()
+    ELECTION_OK = auto()
+    COORDINATOR = auto()
 
 
 MESSAGE_TYPE_OFFSET = 0
-CLIENT_ID_OFFSET = MESSAGE_TYPE_OFFSET + UINT32_SIZE
-MESSAGE_ID_OFFSET = CLIENT_ID_OFFSET + UINT32_SIZE
-MESSAGE_ID_SIZE = 16
-PAYLOAD_SIZE_OFFSET = MESSAGE_ID_OFFSET + MESSAGE_ID_SIZE
+PAYLOAD_SIZE_OFFSET = MESSAGE_TYPE_OFFSET + UINT32_SIZE
 HEADER_SIZE = PAYLOAD_SIZE_OFFSET + UINT32_SIZE
 
 
-def serialize_msg(message_type, client_id, message_id, *fields, producer_id="gateway", key=None):
-    # Valida que el tipo de mensaje esté definido.
+def serialize_msg(message_type, *fields):
     MsgType(message_type)
-    if len(message_id) != MESSAGE_ID_SIZE:
-        raise ValueError("Invalid message ID length")
-    payload = encode_fields(producer_id, message_id if key is None else key, *fields)
+    payload = encode_fields(*fields)
     return (
         int(message_type).to_bytes(UINT32_SIZE, "big")
-        + client_id.to_bytes(UINT32_SIZE, "big")
-        + message_id
         + len(payload).to_bytes(UINT32_SIZE, "big")
         + payload
     )
@@ -45,12 +41,8 @@ def deserialize_msg(message):
         raise ValueError("Incomplete internal header")
 
     message_type = int.from_bytes(
-        message[MESSAGE_TYPE_OFFSET:CLIENT_ID_OFFSET], "big"
+        message[MESSAGE_TYPE_OFFSET:PAYLOAD_SIZE_OFFSET], "big"
     )
-    client_id = int.from_bytes(
-        message[CLIENT_ID_OFFSET:MESSAGE_ID_OFFSET], "big"
-    )
-    message_id = message[MESSAGE_ID_OFFSET:PAYLOAD_SIZE_OFFSET]
     size = int.from_bytes(
         message[PAYLOAD_SIZE_OFFSET:HEADER_SIZE], "big"
     )
@@ -61,5 +53,5 @@ def deserialize_msg(message):
         )
 
     MsgType(message_type)
-    producer_id, key, *fields = decode_fields(message[HEADER_SIZE:])
-    return message_type, client_id, message_id, producer_id, key, tuple(fields)
+    fields = decode_fields(message[HEADER_SIZE:])
+    return message_type, fields

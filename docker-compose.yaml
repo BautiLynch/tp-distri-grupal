@@ -11,6 +11,7 @@ services:
         condition: service_healthy
         required: true
     environment:
+      HEARTBEAT_QUEUE: heartbeat
       ID: "0"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
@@ -33,6 +34,7 @@ services:
         condition: service_healthy
         required: true
     environment:
+      HEARTBEAT_QUEUE: heartbeat
       ID: "1"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
@@ -55,6 +57,7 @@ services:
         condition: service_healthy
         required: true
     environment:
+      HEARTBEAT_QUEUE: heartbeat
       ID: "2"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
@@ -80,6 +83,7 @@ services:
       AVERAGE_PREFIX: average
       FILTER_AVERAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
+      HEARTBEAT_QUEUE: heartbeat
       ID: "0"
       INPUT_EXCHANGE: average
       MOM_HOST: rabbitmq
@@ -104,6 +108,7 @@ services:
       AVERAGE_PREFIX: average
       FILTER_AVERAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
+      HEARTBEAT_QUEUE: heartbeat
       ID: "1"
       INPUT_EXCHANGE: average
       MOM_HOST: rabbitmq
@@ -128,6 +133,7 @@ services:
       AVERAGE_PREFIX: average
       FILTER_AVERAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
+      HEARTBEAT_QUEUE: heartbeat
       ID: "2"
       INPUT_EXCHANGE: average
       MOM_HOST: rabbitmq
@@ -242,6 +248,7 @@ services:
         condition: service_healthy
         required: true
     environment:
+      HEARTBEAT_QUEUE: heartbeat
       ID: "0"
       IMAGE_GETTER_AMOUNT: "1"
       IMAGE_GETTER_PREFIX: image_getter
@@ -262,6 +269,7 @@ services:
         condition: service_healthy
         required: true
     environment:
+      HEARTBEAT_QUEUE: heartbeat
       ID: "1"
       IMAGE_GETTER_AMOUNT: "1"
       IMAGE_GETTER_PREFIX: image_getter
@@ -282,6 +290,7 @@ services:
         condition: service_healthy
         required: true
     environment:
+      HEARTBEAT_QUEUE: heartbeat
       ID: "2"
       IMAGE_GETTER_AMOUNT: "1"
       IMAGE_GETTER_PREFIX: image_getter
@@ -304,6 +313,7 @@ services:
     environment:
       AVERAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
+      HEARTBEAT_QUEUE: heartbeat
       ID: "0"
       INPUT_EXCHANGE: filter_average
       MOM_HOST: rabbitmq
@@ -327,6 +337,7 @@ services:
     environment:
       AVERAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
+      HEARTBEAT_QUEUE: heartbeat
       ID: "1"
       INPUT_EXCHANGE: filter_average
       MOM_HOST: rabbitmq
@@ -350,6 +361,7 @@ services:
     environment:
       AVERAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
+      HEARTBEAT_QUEUE: heartbeat
       ID: "2"
       INPUT_EXCHANGE: filter_average
       MOM_HOST: rabbitmq
@@ -371,6 +383,7 @@ services:
         condition: service_healthy
         required: true
     environment:
+      HEARTBEAT_QUEUE: heartbeat
       ID: "0"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
@@ -392,6 +405,7 @@ services:
         condition: service_healthy
         required: true
     environment:
+      HEARTBEAT_QUEUE: heartbeat
       ID: "1"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
@@ -413,6 +427,7 @@ services:
         condition: service_healthy
         required: true
     environment:
+      HEARTBEAT_QUEUE: heartbeat
       ID: "2"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
@@ -438,6 +453,7 @@ services:
       AVERAGE_EXCHANGE: average
       FILTER_AVERAGE_AMOUNT: "3"
       FILTER_AVERAGE_EXCHANGE: filter_average
+      HEARTBEAT_QUEUE: heartbeat
       ID: "0"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
@@ -463,6 +479,7 @@ services:
       AVERAGE_EXCHANGE: average
       FILTER_AVERAGE_AMOUNT: "3"
       FILTER_AVERAGE_EXCHANGE: filter_average
+      HEARTBEAT_QUEUE: heartbeat
       ID: "1"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
@@ -488,6 +505,7 @@ services:
       AVERAGE_EXCHANGE: average
       FILTER_AVERAGE_AMOUNT: "3"
       FILTER_AVERAGE_EXCHANGE: filter_average
+      HEARTBEAT_QUEUE: heartbeat
       ID: "2"
       INPUT_EXCHANGE: splitter_output
       MOM_HOST: rabbitmq
@@ -620,6 +638,7 @@ services:
         required: true
     environment:
       FILTER_YEAR_PLUS_AMOUNT: "3"
+      HEARTBEAT_QUEUE: heartbeat
       ID: "0"
       IMAGE_TIMEOUT: "10"
       INPUT_EXCHANGE: image_getter
@@ -637,11 +656,75 @@ services:
         required: true
     environment:
       AGGREGATION_AMOUNT: "3"
+      HEARTBEAT_QUEUE: heartbeat
       INPUT_QUEUE: join_queue
       MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: results
       PYTHONUNBUFFERED: "1"
       TOP_SIZE: "20"
+  monitor_0:
+    build:
+      context: ./src
+      dockerfile: monitor/Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+        required: true
+    environment:
+      ID: "0"
+      HEARTBEAT_ALLOWED_MISSES: "3"
+      HEARTBEAT_INTERVAL: "5"
+      GOSSIP_EXCHANGE: monitor_gossip
+      INPUT_QUEUE: heartbeat
+      MONITOR_AMOUNT: "3"
+      MOM_HOST: rabbitmq
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        type: bind
+  monitor_1:
+    build:
+      context: ./src
+      dockerfile: monitor/Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+        required: true
+    environment:
+      ID: "1"
+      HEARTBEAT_ALLOWED_MISSES: "3"
+      HEARTBEAT_INTERVAL: "5"
+      GOSSIP_EXCHANGE: monitor_gossip
+      INPUT_QUEUE: heartbeat
+      MONITOR_AMOUNT: "3"
+      MOM_HOST: rabbitmq
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        type: bind
+  monitor_2:
+    build:
+      context: ./src
+      dockerfile: monitor/Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+        required: true
+    environment:
+      ID: "2"
+      HEARTBEAT_ALLOWED_MISSES: "3"
+      HEARTBEAT_INTERVAL: "5"
+      GOSSIP_EXCHANGE: monitor_gossip
+      INPUT_QUEUE: heartbeat
+      MONITOR_AMOUNT: "3"
+      MOM_HOST: rabbitmq
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        type: bind
   rabbitmq:
     build:
       context: ./src/rabbitmq
@@ -679,6 +762,7 @@ services:
       AGGREGATION_AMOUNT: "3"
       FILTER_LANGUAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
+      HEARTBEAT_QUEUE: heartbeat
       ID: "0"
       INPUT_EXCHANGE: splitter
       MOM_HOST: rabbitmq
@@ -697,6 +781,7 @@ services:
       AGGREGATION_AMOUNT: "3"
       FILTER_LANGUAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
+      HEARTBEAT_QUEUE: heartbeat
       ID: "1"
       INPUT_EXCHANGE: splitter
       MOM_HOST: rabbitmq
@@ -715,6 +800,7 @@ services:
       AGGREGATION_AMOUNT: "3"
       FILTER_LANGUAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
+      HEARTBEAT_QUEUE: heartbeat
       ID: "2"
       INPUT_EXCHANGE: splitter
       MOM_HOST: rabbitmq

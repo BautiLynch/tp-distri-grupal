@@ -3,7 +3,15 @@ SHELL := /bin/bash
 REFERENCIA ?= test/referencia.json
 export LOG_LEVEL
 
-.PHONY: setup up logs test run verify down
+# Configuracion del chaos monkey (make chaos). Se pueden pisar al invocar:
+# make chaos CHAOS_INTERVAL=5 CHAOS_TARGETS=splitter,aggregation
+export CHAOS_INTERVAL ?= 15
+export CHAOS_KILLS_PER_ROUND ?= 1
+export CHAOS_START_DELAY ?= 0
+export CHAOS_TARGETS ?= filter,filter_language,filter_year,filter_average,image_getter,splitter,aggregation,average,join
+export CHAOS_SEED ?=
+
+.PHONY: setup up logs test run verify down chaos
 
 setup:
 	@test -n "$(strip $(GB))" || { echo 'Falta GB. Uso: make setup GB=1.5' >&2; exit 1; }
@@ -41,3 +49,6 @@ verify:
 
 down:
 	docker compose down
+
+chaos:
+	python3 tools/chaos_monkey.py

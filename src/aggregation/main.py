@@ -1,9 +1,11 @@
 import heapq
 import os
+import socket
 import logging
 import sys
 
 from common import middleware, storage
+from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
 from common.storage.message_publisher import MessagePublisher
 from common.storage.eof_counter import EofCounter
@@ -11,6 +13,8 @@ from common.message_protocol.internal import deserialize_msg, MsgType
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
+HEARTBEAT_QUEUE = os.environ["HEARTBEAT_QUEUE"]
+HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 OUTPUT_QUEUE = os.environ["OUTPUT_QUEUE"]
 SPLITTER_AMOUNT = int(os.environ["SPLITTER_AMOUNT"])
@@ -20,10 +24,13 @@ STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
 class AggregationFilter:
 
     def __init__(self):
+        self.heartbeat = HeartbeatSender(
+            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"aggregation_{ID}", HEARTBEAT_INTERVAL
+        )
         self.shutdown = GracefulShutdown()
         self.last_received = {}
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, INPUT_EXCHANGE, [f"words_{ID}"], consume=True
+            MOM_HOST, INPUT_EXCHANGE, [f"words_{ID}"], consume=True, queue_name=f"aggregation_{ID}"
         )
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, OUTPUT_QUEUE
@@ -76,6 +83,7 @@ class AggregationFilter:
         ack()
 
     def close(self):
+        self.heartbeat.stop()
         for mom in [self.input_exchange, self.output_queue, self.results, self.eofs]:
             try:
                 mom.close()
@@ -86,6 +94,7 @@ class AggregationFilter:
         try:
             self.eofs.recover()
             self.results.recover()
+            self.heartbeat.start()
         except Exception:
             self.close()
             raise
