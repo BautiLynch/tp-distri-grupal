@@ -603,12 +603,19 @@ services:
       FILTER_PREFIX: filter
       HANDLER_HOST: handler
       HANDLER_PORT: "5679"
+      HEARTBEAT_QUEUE: heartbeat
       MOM_HOST: rabbitmq
       PYTHONUNBUFFERED: "1"
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: "5678"
+      STORAGE_PATH: /storage
       SPLITTER_AMOUNT: "3"
       SPLITTER_PREFIX: splitter
+    volumes:
+      - source: gateway_storage
+        target: /storage
+        type: volume
+        volume: {}
   handler:
     build:
       context: ./src
@@ -619,6 +626,7 @@ services:
         required: true
     environment:
       INPUT_EXCHANGE: results
+      HEARTBEAT_QUEUE: heartbeat
       MOM_HOST: rabbitmq
       PYTHONUNBUFFERED: "1"
       QUERY_1_REPLICAS: "3"
@@ -642,7 +650,6 @@ services:
       ID: "0"
       IMAGE_TIMEOUT: "10"
       INPUT_EXCHANGE: image_getter
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: results
       PYTHONUNBUFFERED: "1"
@@ -808,6 +815,7 @@ services:
       PYTHONUNBUFFERED: "1"
       STOPWORDS_PATH: /stopwords
 volumes:
+  gateway_storage: null
   aggregation_storage_0: null
   aggregation_storage_0_2: null
   aggregation_storage_1: null

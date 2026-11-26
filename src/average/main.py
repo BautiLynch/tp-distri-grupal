@@ -64,7 +64,7 @@ class Average:
         for url, amount in self.urls_by_client.get(client_id, {}).items():
             self.results.send(MsgType.WORD_YEAR_AMOUNT, client_id, message_id, (url, MsgType.WORD_YEAR_AMOUNT), source, url, formatted_date, amount)
         
-        self.results.send(MsgType.END_OF_RECORDS, client_id, message_id, (message_id, MsgType.END_OF_RECORDS), source, f"average_{ID}")
+        self.results.send(MsgType.END_OF_RECORDS, client_id, message_id, (message_id, MsgType.END_OF_RECORDS), source, f"average_{ID}", False)
         self._release_client(client_id)
 
     def _release_client(self, client_id):
@@ -111,7 +111,7 @@ class Average:
 
 def main():
     logging.basicConfig(
-        level=logging.INFO,
+        level=os.environ.get("LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s.%(msecs)03d | %(levelname)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )

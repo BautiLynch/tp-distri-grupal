@@ -90,7 +90,7 @@ class ImageGetter:
         elif message_type == MsgType.END_OF_RECORDS:
             count = self.eofs.save(client_id, (message_id, fields[0]))
             if count == FILTER_YEAR_PLUS_AMOUNT:
-                self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), (producer_id, key), QueryId.Q2)
+                self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), (producer_id, key), QueryId.Q2, False)
                 self.eofs.clear(client_id)
 
         else:

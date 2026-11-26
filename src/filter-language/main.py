@@ -62,7 +62,7 @@ class FilterLanguage:
         elif message_type == MsgType.END_OF_RECORDS:
             count = self.eofs.save(client_id, (message_id, fields[0]))
             if count == SPLITTER_AMOUNT:
-                self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), (producer_id, key), QueryId.Q3)
+                self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), (producer_id, key), QueryId.Q3, False)
                 self._release_client(client_id)
 
         else:
@@ -95,7 +95,7 @@ class FilterLanguage:
 
 def main():
     logging.basicConfig(
-        level=logging.INFO,
+        level=os.environ.get("LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s.%(msecs)03d | %(levelname)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )

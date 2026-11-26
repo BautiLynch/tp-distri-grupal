@@ -1,3 +1,5 @@
+"""END_OF_RECORDS, BASELINE_END y QUERY_END terminan con desconectado: bool."""
+
 from enum import IntEnum, auto
 
 from .fields import UINT32_SIZE, decode_fields, encode_fields

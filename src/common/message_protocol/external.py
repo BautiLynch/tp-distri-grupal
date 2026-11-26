@@ -1,10 +1,3 @@
-"""Protocolo entre el cliente y el sistema (gateway y handler).
-
-Cada mensaje es [tipo: uint32][largo del payload: uint32][payload], donde el
-payload son los campos codificados con el formato TLV de `fields`.
-`recv_msg` siempre devuelve (tipo, tupla de campos).
-"""
-
 from enum import IntEnum, auto
 
 from .fields import UINT32_SIZE, decode_fields, encode_fields

@@ -13,10 +13,18 @@ from results import ResultWriter
 
 
 LOG_EVERY = 50000
+RETRY_DELAY = 1
+
+
+def socket_call(operation, *args):
+    try:
+        return operation(*args)
+    except (OSError, EOFError) as error:
+        raise ConnectionError(str(error)) from error
 
 
 def expect_message(connection, expected_type):
-    message_type, fields = external.recv_msg(connection)
+    message_type, fields = socket_call(external.recv_msg, connection)
     if message_type != expected_type:
         raise ValueError(f"Expected message {expected_type}, got {message_type}")
     return fields
@@ -52,10 +60,15 @@ class Client:
                     connection.shutdown(socket.SHUT_RDWR)
                 except OSError as error:
                     logging.debug("Socket already disconnected: %s", error)
+                try:
+                    connection.close()
+                except OSError as error:
+                    logging.debug("Could not close client socket: %s", error)
+            self.connections.clear()
 
     def _check_stopping(self):
         self._raise_receiver_error()
-        if self.stopping.is_set():
+        if self.interrupted.is_set() or self.stopping.is_set():
             raise InterruptedError("Client stopped")
 
     def _connect(self, address, attempts=1):
@@ -68,17 +81,16 @@ class Client:
             except OSError as error:
                 self._check_stopping()
                 if attempt == attempts:
-                    raise
+                    raise ConnectionError(f"Could not connect to {address}") from error
                 delay = 2 ** (attempt - 1)
                 logging.warning(
                     "Connection to %s:%s failed (attempt %s/%s): %s; retrying in %ss",
                     *address, attempt, attempts, error, delay,
                 )
                 self.stopping.wait(delay)
-        connection.settimeout(None)
         with self.connections_lock:
             self.connections.append(connection)
-            if self.stopping.is_set():
+            if self.interrupted.is_set() or self.stopping.is_set():
                 connection.close()
                 raise InterruptedError("Client stopped")
         return connection
@@ -88,17 +100,23 @@ class Client:
             error = self.receiver_errors.get_nowait()
         except queue.Empty:
             return
+        if isinstance(error, ConnectionError):
+            raise error
         raise RuntimeError("Could not receive or save results") from error
 
     def _receive_results(self, connection, client_id, output):
         try:
-            external.send_msg(connection, external.MsgType.CLIENT_ID, client_id)
+            socket_call(external.send_msg, connection, external.MsgType.CLIENT_ID, client_id)
             expect_message(connection, external.MsgType.ACK)
+            connection.settimeout(None)
             self.receiver_ready.set()
             received_count = 0
             while True:
-                message_type, fields = external.recv_msg(connection)
+                message_type, fields = socket_call(external.recv_msg, connection)
                 if message_type == external.MsgType.END_OF_RECORDS:
+                    disconnected, = fields
+                    if disconnected:
+                        raise ConnectionError("Handler cancelled the request")
                     return
                 if message_type != external.MsgType.RESULT:
                     raise ValueError(f"Unexpected handler message {message_type}")
@@ -119,12 +137,14 @@ class Client:
     def _send_records(self, connection, source):
         for sent_count, line in enumerate(source, start=1):
             self._check_stopping()
-            external.send_msg(connection, external.MsgType.ARTICLE, line)
+            socket_call(external.send_msg, connection, external.MsgType.ARTICLE, line)
             if sent_count % LOG_EVERY == 0:
                 logging.debug("Client sent %s articles", sent_count)
         self._check_stopping()
-        external.send_msg(connection, external.MsgType.END_OF_RECORDS)
-        logging.info("Client sent all records")
+        socket_call(external.send_msg, connection, external.MsgType.END_OF_RECORDS, False)
+        connection.settimeout(self.connection_timeout)
+        expect_message(connection, external.MsgType.ACK)
+        logging.info("Gateway accepted all records")
 
     def _join_receiver(self, receiver):
         while receiver.is_alive():
@@ -133,6 +153,28 @@ class Client:
                 return
 
     def run(self):
+        attempt = 0
+        while True:
+            if self.interrupted.is_set():
+                raise InterruptedError("Client interrupted")
+            self.stopping.clear()
+            self.receiver_ready.clear()
+            self.receiver_errors = queue.SimpleQueue()
+            attempt += 1
+            try:
+                self._run_attempt()
+                return
+            except ConnectionError as error:
+                if self.interrupted.is_set():
+                    raise InterruptedError("Client interrupted") from error
+                logging.warning(
+                    "Request attempt %s lost its connection: %s; restarting from scratch in %ss",
+                    attempt, error, RETRY_DELAY,
+                )
+                if self.interrupted.wait(RETRY_DELAY):
+                    raise InterruptedError("Client interrupted") from error
+
+    def _run_attempt(self):
         receiver = None
         with open(self.input_path, "rb") as source:
             with ResultWriter(self.output_dir) as output:
@@ -140,16 +182,16 @@ class Client:
                     gateway = self._connect(self.gateway_address, attempts=3)
                     client_id, = expect_message(gateway, external.MsgType.CLIENT_ID)
                     handler_address = expect_message(gateway, external.MsgType.HANDLER_ADDRESS)
+                    gateway.settimeout(None)
                     handler = self._connect(handler_address)
                     receiver = threading.Thread(
                         target=self._receive_results,
                         args=(handler, client_id, output),
                         name="result-receiver",
-                        daemon=True,
                     )
                     receiver.start()
                     if not self.receiver_ready.wait(timeout=self.connection_timeout):
-                        raise TimeoutError("Timed out waiting for the result receiver")
+                        raise ConnectionError("Timed out waiting for the result receiver")
                     self._check_stopping()
                     self._send_records(gateway, source)
                     self._join_receiver(receiver)
@@ -162,11 +204,7 @@ class Client:
                 finally:
                     self.stop()
                     if receiver is not None and receiver.ident is not None:
-                        receiver.join(timeout=self.connection_timeout)
-                    with self.connections_lock:
-                        for connection in self.connections:
-                            connection.close()
-                        self.connections.clear()
+                        receiver.join()
 
 
 def main():
