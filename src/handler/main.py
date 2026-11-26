@@ -58,19 +58,26 @@ class ClientHandler:
         )
         if self.stopping:
             return
-        send_msg(self.client_socket, ExternalMsgType.ACK)
+        self.send_message(ExternalMsgType.ACK)
         self.input_exchange.start_consuming(self.handle_result)
+
+    def send_message(self, message_type, *fields):
+        try:
+            send_msg(self.client_socket, message_type, *fields)
+        except OSError:
+            self.stopping = True
+            raise
 
     def handle_result(self, message, ack, nack):
         try:
             message_type, fields = deserialize_msg(message)
-            client_id, message_id, producer_id, key, *fields = fields
+            client_id, message_id, producer_id, key, *body = fields
             producer = (client_id, producer_id)
             if self.last_received.get(producer) == key:
                 ack()
                 return
             if message_type == InternalMsgType.QUERY_END:
-                query_id = QueryId(fields[0])
+                query_id = QueryId(body[0])
                 self.query_end_counts[query_id] += 1
                 if self.query_end_counts[query_id] == QUERY_REPLICAS[query_id]:
                     logging.info(
@@ -79,9 +86,9 @@ class ClientHandler:
                     self.completed_queries.add(query_id)
                 self.finished = len(self.completed_queries) == len(QUERY_REPLICAS)
                 if self.finished:
-                    send_msg(self.client_socket, ExternalMsgType.END_OF_RECORDS, False)
+                    self.send_message(ExternalMsgType.END_OF_RECORDS, False)
             elif message_type == InternalMsgType.RESULT:
-                send_msg(self.client_socket, ExternalMsgType.RESULT, *fields)
+                self.send_message(ExternalMsgType.RESULT, *body)
             else:
                 raise ValueError(f"Unexpected handler message type: {message_type}")
         except Exception:
@@ -107,6 +114,7 @@ class ClientHandler:
             logging.debug("Client already disconnected: %s", error)
 
     def close(self):
+        self.stopping = True
         if self.input_exchange is not None:
             try:
                 self.input_exchange.close()
@@ -135,16 +143,20 @@ class Handler:
             worker_pids[connection_id] = os.getpid()
             if not sigterm_received.value and not client_handler.stopping:
                 client_handler.run()
-        except (ConnectionError, EOFError):
-            logging.info("Client connection %s closed by the client", connection_id)
+        except (OSError, EOFError) as error:
+            logging.info("Client connection %s disconnected: %s", connection_id, error)
         except Exception:
             if not client_handler.stopping:
                 logging.exception("Client connection %s failed", connection_id)
         finally:
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
-            client_handler.close()
-            client_dict.pop(connection_id, None)
-            worker_pids.pop(connection_id, None)
+            try:
+                client_handler.close()
+            except Exception:
+                logging.exception("Could not close client connection %s", connection_id)
+            finally:
+                client_dict.pop(connection_id, None)
+                worker_pids.pop(connection_id, None)
 
     @staticmethod
     def stop_clients(client_dict, worker_pids, sigterm_received):
