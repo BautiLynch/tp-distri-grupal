@@ -608,8 +608,14 @@ services:
       PYTHONUNBUFFERED: "1"
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: "5678"
+      STORAGE_PATH: /storage
       SPLITTER_AMOUNT: "3"
       SPLITTER_PREFIX: splitter
+    volumes:
+      - source: gateway_storage
+        target: /storage
+        type: volume
+        volume: {}
   handler:
     build:
       context: ./src
@@ -809,6 +815,7 @@ services:
       PYTHONUNBUFFERED: "1"
       STOPWORDS_PATH: /stopwords
 volumes:
+  gateway_storage: null
   aggregation_storage_0: null
   aggregation_storage_0_2: null
   aggregation_storage_1: null

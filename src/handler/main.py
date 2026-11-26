@@ -95,6 +95,7 @@ class Handler:
                         send_msg(
                             client_socket,
                             ExternalMsgType.END_OF_RECORDS,
+                            False,
                         )
                 elif message_type == InternalMsgType.RESULT:
                     send_msg(client_socket, ExternalMsgType.RESULT, *fields)

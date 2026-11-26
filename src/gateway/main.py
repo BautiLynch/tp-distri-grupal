@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from common.heartbeat import HeartbeatSender
 from common import middleware, message_protocol
+from common.message_protocol.fields import encode_fields
+from common.storage.wal import WriteAheadLog
 from helpers import preprocess_article, parse_article
 
 SERVER_HOST = os.environ["SERVER_HOST"]
@@ -22,6 +24,7 @@ SPLITTER_PREFIX = os.environ["SPLITTER_PREFIX"]
 SPLITTER_AMOUNT = int(os.environ["SPLITTER_AMOUNT"])
 HANDLER_HOST = os.environ["HANDLER_HOST"]
 HANDLER_PORT = int(os.environ["HANDLER_PORT"])
+STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
 
 if FILTER_AMOUNT < 1:
     raise ValueError("FILTER_AMOUNT must be greater than zero")
@@ -59,10 +62,14 @@ class Gateway:
     def handle_client_request(client_socket, client_id, client_dict, sigterm_received):
         filter_exchange = None
         splitter_exchange = None
+        client_wal = None
         article_index = 0
         try:
             if sigterm_received.value:
                 return
+            client_wal = WriteAheadLog(f"{STORAGE_PATH}/gateway_client_{client_id}.wal")
+            client_wal.save(encode_fields(client_id))
+            client_wal.mark_processed()
             message_protocol.external.send_msg(
                 client_socket, message_protocol.external.MsgType.CLIENT_ID, client_id
             )
@@ -104,10 +111,14 @@ class Gateway:
                     message_id = uuid4().bytes
                     end_of_records = message_protocol.internal.serialize_msg(
                         message_protocol.internal.MsgType.END_OF_RECORDS,
-                        client_id, message_id, "gateway", message_id,
+                        client_id, message_id, "gateway", message_id, False,
                     )
+                    client_wal.save(encode_fields("EOF_R"))
                     filter_exchange.send(end_of_records)
                     splitter_exchange.send(end_of_records)
+                    client_wal.mark_processed()
+                    client_wal.save(encode_fields("EOF_S"))
+                    client_wal.mark_processed()
 
                 if message_type == message_protocol.external.MsgType.END_OF_RECORDS:
                     break
@@ -118,12 +129,12 @@ class Gateway:
         except Exception as e:
             logging.error("Client %s: %s", client_id, e)
         finally:
-            for mom in (filter_exchange, splitter_exchange):
+            for mom in (filter_exchange, splitter_exchange, client_wal):
                 if mom is not None:
                     try:
                         mom.close()
                     except Exception:
-                        logging.exception("Could not close a gateway output connection")
+                        logging.exception("Could not close a gateway client resource")
             try:
                 client_socket.shutdown(socket.SHUT_RDWR)
             except socket.error as e:

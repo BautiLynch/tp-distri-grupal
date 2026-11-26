@@ -102,7 +102,7 @@ class Splitter:
                 self._split_and_send(client_id, message_id, fields, source=(producer_id, key))
 
             elif message_type == MsgType.END_OF_RECORDS:
-                self.publisher.send(message_type, client_id, message_id, (message_id, message_type), (producer_id, key), f"splitter_{ID}")
+                self.publisher.send(message_type, client_id, message_id, (message_id, message_type), (producer_id, key), f"splitter_{ID}", False)
 
             else:
                 raise ValueError(f"Unexpected splitter message type: {message_type}")

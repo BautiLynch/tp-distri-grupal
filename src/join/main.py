@@ -64,7 +64,7 @@ class JoinFilter:
         ]
 
         self.results.send(MsgType.RESULT, client_id, message_id, (message_id, MsgType.RESULT), source, QueryId.Q4, result)
-        self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), source, QueryId.Q4)
+        self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), source, QueryId.Q4, False)
 
         self._release_client(client_id)
 

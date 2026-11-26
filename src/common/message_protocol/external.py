@@ -3,6 +3,7 @@
 Cada mensaje es [tipo: uint32][largo del payload: uint32][payload], donde el
 payload son los campos codificados con el formato TLV de `fields`.
 `recv_msg` siempre devuelve (tipo, tupla de campos).
+END_OF_RECORDS lleva un unico campo: desconectado (bool).
 """
 
 from enum import IntEnum, auto

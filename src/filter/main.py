@@ -76,8 +76,8 @@ class FilterYearPlus:
                         self.images.send(MsgType.GET_IMAGE, client_id, message_id, (message_id, MsgType.GET_IMAGE), (producer_id, key), url, name, image_url)
 
             elif message_type == MsgType.END_OF_RECORDS:
-                self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), (producer_id, key), QueryId.Q1)
-                self.images.send(MsgType.END_OF_RECORDS, client_id, message_id, (message_id, MsgType.END_OF_RECORDS), (producer_id, key), f"filter_{ID}")
+                self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), (producer_id, key), QueryId.Q1, False)
+                self.images.send(MsgType.END_OF_RECORDS, client_id, message_id, (message_id, MsgType.END_OF_RECORDS), (producer_id, key), f"filter_{ID}", False)
         except Exception:
             logging.exception("Error processing message")
             nack()

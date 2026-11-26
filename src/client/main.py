@@ -123,7 +123,7 @@ class Client:
             if sent_count % LOG_EVERY == 0:
                 logging.debug("Client sent %s articles", sent_count)
         self._check_stopping()
-        external.send_msg(connection, external.MsgType.END_OF_RECORDS)
+        external.send_msg(connection, external.MsgType.END_OF_RECORDS, False)
         logging.info("Client sent all records")
 
     def _join_receiver(self, receiver):

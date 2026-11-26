@@ -9,6 +9,7 @@ TYPE_TEXT = 2
 TYPE_BYTES = 3
 TYPE_LIST = 4
 TYPE_TUPLE = 5
+TYPE_BOOL = 6
 
 UINT32_SIZE = 4
 LENGTH_SIZE = UINT32_SIZE
@@ -16,7 +17,11 @@ FIELD_HEADER_SIZE = 1 + LENGTH_SIZE
 
 
 def _encode(value):
-    if isinstance(value, int) and not isinstance(value, bool):
+    if isinstance(value, bool):
+        field_type = TYPE_BOOL
+        content = b"\x01" if value else b"\x00"
+
+    elif isinstance(value, int):
         field_type = TYPE_INT
         content = value.to_bytes(UINT32_SIZE, "big")
 
@@ -61,7 +66,12 @@ def _decode(data):
 
         content = data[header_end:content_end]
 
-        if field_type == TYPE_INT:
+        if field_type == TYPE_BOOL:
+            if content not in (b"\x00", b"\x01"):
+                raise ValueError("Invalid boolean field")
+            value = content == b"\x01"
+
+        elif field_type == TYPE_INT:
             if size != UINT32_SIZE:
                 raise ValueError("Invalid integer length")
             value = int.from_bytes(content, "big")

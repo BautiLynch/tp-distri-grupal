@@ -68,7 +68,7 @@ class FilterAverage:
                 self._process_abstract(client_id, message_id, url, amount_words, source=source)
 
         if total == FILTER_YEAR_AMOUNT + AVERAGE_AMOUNT:
-            self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), source, QueryId.Q5)
+            self.results.send(MsgType.QUERY_END, client_id, message_id, (message_id, MsgType.QUERY_END), source, QueryId.Q5, False)
             self._release_client(client_id)
 
     def _release_client(self, client_id):
