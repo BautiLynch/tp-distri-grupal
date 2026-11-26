@@ -9,6 +9,7 @@ from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
 from common.storage.message_publisher import MessagePublisher
 from common.storage.eof_counter import EofCounter
+from common.storage.state_log import StateLog
 from common.message_protocol.internal import deserialize_msg, MsgType
 from common.message_protocol.queries import QueryId
 
@@ -33,6 +34,7 @@ class FilterAverage:
         )
         self.shutdown = GracefulShutdown()
         self.last_received = {}
+        self.state = StateLog(f"{STORAGE_PATH}/filter_average_{ID}_state")
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [ID], consume=True, queue_name=f"filter_average_{ID}"
         )
@@ -72,6 +74,7 @@ class FilterAverage:
             self._release_client(client_id)
 
     def _release_client(self, client_id):
+        self.state.clear(client_id)
         self.eofs.clear(client_id)
         self.baseline_eofs.clear(client_id)
         self.words_by_client.pop(client_id, None)
@@ -95,6 +98,7 @@ class FilterAverage:
             return
         if message_type == MsgType.WORD_YEAR_AMOUNT:
             url, date_modified, amount = fields
+            self.state.save(client_id, message, int(client_id in self.average_by_client))
 
             if datetime.fromisoformat(date_modified.replace("Z", "+00:00")).year <= YEAR:
                 words_by_url = self.words_by_client.setdefault(client_id, {})
@@ -108,12 +112,29 @@ class FilterAverage:
         else:
             nack()
             return
+        if message_type == MsgType.WORD_YEAR_AMOUNT:
+            self.state.mark_processed(client_id)
         self.last_received[producer] = key
         ack()
 
+    def _recover_state(self, record):
+        message, context = record
+        _, fields = deserialize_msg(message)
+        client_id, message_id, producer_id, key, url, date_modified, amount = fields
+        # El primer dato posterior al promedio fija su valor en ese punto.
+        if context and client_id not in self.average_by_client:
+            words_by_url = self.words_by_client.get(client_id, {})
+            self.average_by_client[client_id] = sum(words_by_url.values()) / len(words_by_url) if words_by_url else 0
+        if datetime.fromisoformat(date_modified.replace("Z", "+00:00")).year <= YEAR:
+            words_by_url = self.words_by_client.setdefault(client_id, {})
+            words_by_url[url] = words_by_url.get(url, 0) + amount
+        elif not context:
+            self.pending_messages_by_client.setdefault(client_id, []).append((url, amount))
+        self.last_received[(client_id, producer_id)] = key
+
     def close(self):
         self.heartbeat.stop()
-        for mom in [self.input_exchange, self.output_exchange, self.results, self.eofs, self.baseline_eofs]:
+        for mom in [self.input_exchange, self.output_exchange, self.results, self.eofs, self.baseline_eofs, self.state]:
             try:
                 mom.close()
             except Exception as e:
@@ -124,6 +145,16 @@ class FilterAverage:
             self.eofs.recover()
             self.baseline_eofs.recover()
             self.results.recover()
+            self.state.recover(self._recover_state)
+            if self.results.last is not None:
+                (client_id, source), sent = self.results.last
+                if any(key[-1] == MsgType.QUERY_END for key in sent):
+                    self._release_client(client_id)
+                    self.last_received[(client_id, source[0])] = source[1]
+            for client_id, count in self.baseline_eofs.counts.items():
+                if count == FILTER_YEAR_AMOUNT and client_id not in self.average_by_client:
+                    words_by_url = self.words_by_client.get(client_id, {})
+                    self.average_by_client[client_id] = sum(words_by_url.values()) / len(words_by_url) if words_by_url else 0
             self.heartbeat.start()
         except Exception:
             self.close()

@@ -9,6 +9,7 @@ from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
 from common.storage.message_publisher import MessagePublisher
 from common.storage.eof_counter import EofCounter
+from common.storage.state_log import StateLog
 from common.message_protocol.internal import deserialize_msg, MsgType
 
 ID = os.environ["ID"]
@@ -29,6 +30,7 @@ class AggregationFilter:
         )
         self.shutdown = GracefulShutdown()
         self.last_received = {}
+        self.state = StateLog(f"{STORAGE_PATH}/aggregation_{ID}_state")
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [f"words_{ID}"], consume=True, queue_name=f"aggregation_{ID}"
         )
@@ -58,6 +60,7 @@ class AggregationFilter:
             self._release_client(client_id)
 
     def _release_client(self, client_id):
+        self.state.clear(client_id)
         self.eofs.clear(client_id)
         self.words_by_client.pop(client_id, None)
 
@@ -70,6 +73,7 @@ class AggregationFilter:
             return
         if message_type == MsgType.WORD_BATCH:
             language, words = fields
+            self.state.save(client_id, message)
             counts = self.words_by_client.setdefault(client_id, {})
             for word in words:
                 # Q4 cuenta abstracts que contienen la palabra, no repeticiones.
@@ -80,12 +84,23 @@ class AggregationFilter:
         else:
             nack()
             return
+        if message_type == MsgType.WORD_BATCH:
+            self.state.mark_processed(client_id)
         self.last_received[producer] = key
         ack()
 
+    def _recover_state(self, record):
+        message, context = record
+        _, fields = deserialize_msg(message)
+        client_id, message_id, producer_id, key, language, words = fields
+        counts = self.words_by_client.setdefault(client_id, {})
+        for word in words:
+            counts[word] = counts.get(word, 0) + 1
+        self.last_received[(client_id, producer_id)] = key
+
     def close(self):
         self.heartbeat.stop()
-        for mom in [self.input_exchange, self.output_queue, self.results, self.eofs]:
+        for mom in [self.input_exchange, self.output_queue, self.results, self.eofs, self.state]:
             try:
                 mom.close()
             except Exception as e:
@@ -95,6 +110,12 @@ class AggregationFilter:
         try:
             self.eofs.recover()
             self.results.recover()
+            self.state.recover(self._recover_state)
+            if self.results.last is not None:
+                (client_id, source), sent = self.results.last
+                if any(key[-1] == MsgType.PARTIAL_TOP for key in sent):
+                    self._release_client(client_id)
+                    self.last_received[(client_id, source[0])] = source[1]
             self.heartbeat.start()
         except Exception:
             self.close()

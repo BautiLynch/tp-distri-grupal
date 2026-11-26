@@ -9,6 +9,7 @@ from common.heartbeat import HeartbeatSender
 from common.shutdown import GracefulShutdown
 from common.storage.message_publisher import MessagePublisher
 from common.storage.eof_counter import EofCounter
+from common.storage.state_log import StateLog
 from common.message_protocol.internal import deserialize_msg, MsgType
 
 ID = os.environ["ID"]
@@ -33,6 +34,7 @@ class Average:
         )
         self.shutdown = GracefulShutdown()
         self.last_received = {}
+        self.state = StateLog(f"{STORAGE_PATH}/average_{ID}_state")
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, INPUT_EXCHANGE, [ID], consume=True, queue_name=f"average_{ID}"
         )
@@ -68,6 +70,7 @@ class Average:
         self._release_client(client_id)
 
     def _release_client(self, client_id):
+        self.state.clear(client_id)
         self.eofs.clear(client_id)
         self.urls_by_client.pop(client_id, None)
 
@@ -80,6 +83,7 @@ class Average:
             return
         if message_type == MsgType.WORD_YEAR_AMOUNT:
             url, date_modified, amount = fields
+            self.state.save(client_id, message)
             urls = self.urls_by_client.setdefault(client_id, {})
             urls[url] = urls.get(url, 0) + amount
 
@@ -88,12 +92,22 @@ class Average:
         else:
             nack()
             return
+        if message_type == MsgType.WORD_YEAR_AMOUNT:
+            self.state.mark_processed(client_id)
         self.last_received[producer] = key
         ack()
 
+    def _recover_state(self, record):
+        message, context = record
+        _, fields = deserialize_msg(message)
+        client_id, message_id, producer_id, key, url, date_modified, amount = fields
+        urls = self.urls_by_client.setdefault(client_id, {})
+        urls[url] = urls.get(url, 0) + amount
+        self.last_received[(client_id, producer_id)] = key
+
     def close(self):
         self.heartbeat.stop()
-        for mom in [self.input_exchange, self.output_exchange, self.results, self.eofs]:
+        for mom in [self.input_exchange, self.output_exchange, self.results, self.eofs, self.state]:
             try:
                 mom.close()
             except Exception as e:
@@ -103,6 +117,12 @@ class Average:
         try:
             self.eofs.recover()
             self.results.recover()
+            self.state.recover(self._recover_state)
+            if self.results.last is not None:
+                (client_id, source), sent = self.results.last
+                if any(key[-1] == MsgType.END_OF_RECORDS for key in sent):
+                    self._release_client(client_id)
+                    self.last_received[(client_id, source[0])] = source[1]
             self.heartbeat.start()
         except Exception:
             self.close()

@@ -661,7 +661,12 @@ services:
       MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: results
       PYTHONUNBUFFERED: "1"
+      STORAGE_PATH: /storage
       TOP_SIZE: "20"
+    volumes:
+      - source: join_storage
+        target: /storage
+        type: volume
   monitor_0:
     build:
       context: ./src
@@ -808,6 +813,7 @@ services:
       PYTHONUNBUFFERED: "1"
       STOPWORDS_PATH: /stopwords
 volumes:
+  join_storage: null
   aggregation_storage_0: null
   aggregation_storage_0_2: null
   aggregation_storage_1: null
