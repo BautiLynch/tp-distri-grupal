@@ -5,12 +5,13 @@ import signal
 import socket
 import sys
 import threading
+from pathlib import Path
 from uuid import uuid4
 
 from common.heartbeat import HeartbeatSender
 from common import middleware, message_protocol
-from common.message_protocol.fields import encode_fields
-from common.storage.wal import WriteAheadLog
+from common.message_protocol.fields import decode_fields, encode_fields
+from common.storage.wal import PROCESSED, WriteAheadLog
 from helpers import preprocess_article, parse_article
 
 SERVER_HOST = os.environ["SERVER_HOST"]
@@ -45,6 +46,93 @@ class Gateway:
         self.shutdown_requested = threading.Event()
         signal.signal(signal.SIGTERM, self.handle_sigterm)
         signal.signal(signal.SIGINT, self.handle_sigterm)
+        self.next_client_id = 1
+        self.recover()
+
+    def recover(self):
+        pending_clients = []
+        for path in Path(STORAGE_PATH).glob("gateway_client_*.wal"):
+            client_id = int(path.stem.removeprefix("gateway_client_"))
+            self.next_client_id = max(self.next_client_id, client_id + 1)
+            wal = WriteAheadLog(path)
+            eof_sent = False
+            eof_received = False
+            pending_eof = None
+            try:
+                while (record := wal.read()) is not None:
+                    status, payload = record
+                    fields = decode_fields(payload)
+                    if fields == (client_id,):
+                        continue
+                    if fields and fields[0] == "EOF_R":
+                        eof_received = True
+                        eof_sent = False
+                        pending_eof = fields[1] if len(fields) > 1 else None
+                    elif fields == ("EOF_S",):
+                        eof_sent = status == PROCESSED
+                    else:
+                        raise ValueError(f"Invalid gateway WAL record in {path}")
+            finally:
+                wal.close()
+            if not eof_sent:
+                pending_clients.append((client_id, path, pending_eof, eof_received))
+
+        if not pending_clients:
+            return
+
+        filter_exchange = None
+        splitter_exchange = None
+        try:
+            filter_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+                MOM_HOST, FILTER_PREFIX, [str(index) for index in range(FILTER_AMOUNT)], consume=False
+            )
+            splitter_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+                MOM_HOST, SPLITTER_PREFIX, [str(index) for index in range(SPLITTER_AMOUNT)], consume=False
+            )
+            for client_id, path, pending_eof, eof_received in pending_clients:
+                if self.shutdown_requested.is_set():
+                    return
+                if pending_eof is None:
+                    message_id = uuid4().bytes
+                    pending_eof = message_protocol.internal.serialize_msg(
+                        message_protocol.internal.MsgType.END_OF_RECORDS,
+                        client_id, message_id, "gateway", message_id, not eof_received,
+                    )
+                else:
+                    message_type, fields = message_protocol.internal.deserialize_msg(pending_eof)
+                    if message_type != message_protocol.internal.MsgType.END_OF_RECORDS or fields[0] != client_id:
+                        raise ValueError(f"Invalid pending EOF in {path}")
+                wal = WriteAheadLog(path)
+                try:
+                    self.send_eof(wal, pending_eof, filter_exchange, splitter_exchange)
+                finally:
+                    wal.close()
+                logging.info("Recovered pending EOF for client %s", client_id)
+        finally:
+            for exchange in (filter_exchange, splitter_exchange):
+                if exchange is not None:
+                    try:
+                        exchange.close()
+                    except Exception:
+                        logging.exception("Could not close a gateway recovery connection")
+
+    @staticmethod
+    def register_client(client_id):
+        wal = WriteAheadLog(f"{STORAGE_PATH}/gateway_client_{client_id}.wal")
+        try:
+            wal.save(encode_fields(client_id))
+            wal.mark_processed()
+        finally:
+            wal.close()
+
+    @staticmethod
+    def send_eof(wal, message, filter_exchange, splitter_exchange):
+        wal.save(encode_fields("EOF_R", message))
+        filter_exchange.send(message)
+        splitter_exchange.send(message)
+        wal.mark_processed()
+        wal.save(encode_fields("EOF_S"))
+        wal.mark_processed()
 
     def handle_sigterm(self, signum, frame):
         self.shutdown_requested.set()
@@ -68,8 +156,6 @@ class Gateway:
             if sigterm_received.value:
                 return
             client_wal = WriteAheadLog(f"{STORAGE_PATH}/gateway_client_{client_id}.wal")
-            client_wal.save(encode_fields(client_id))
-            client_wal.mark_processed()
             message_protocol.external.send_msg(
                 client_socket, message_protocol.external.MsgType.CLIENT_ID, client_id
             )
@@ -113,12 +199,7 @@ class Gateway:
                         message_protocol.internal.MsgType.END_OF_RECORDS,
                         client_id, message_id, "gateway", message_id, False,
                     )
-                    client_wal.save(encode_fields("EOF_R"))
-                    filter_exchange.send(end_of_records)
-                    splitter_exchange.send(end_of_records)
-                    client_wal.mark_processed()
-                    client_wal.save(encode_fields("EOF_S"))
-                    client_wal.mark_processed()
+                    Gateway.send_eof(client_wal, end_of_records, filter_exchange, splitter_exchange)
 
                 if message_type == message_protocol.external.MsgType.END_OF_RECORDS:
                     break
@@ -153,7 +234,6 @@ class Gateway:
                     server_socket.bind((SERVER_HOST, SERVER_PORT))
                     server_socket.listen()
                     server_socket.settimeout(0.5)
-                    client_id = 0
                     try:
                         if not self.shutdown_requested.is_set():
                             self.heartbeat.start()
@@ -162,7 +242,13 @@ class Gateway:
                                 client_socket, _ = server_socket.accept()
 
                                 logging.info("A new client has connected")
-                                client_id += 1
+                                client_id = self.next_client_id
+                                self.next_client_id += 1
+                                try:
+                                    self.register_client(client_id)
+                                except Exception:
+                                    client_socket.close()
+                                    raise
                                 client_dict[client_id] = client_socket
                                 processes_pool.apply_async(
                                     Gateway.handle_client_request,
