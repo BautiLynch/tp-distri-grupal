@@ -55,6 +55,7 @@ class ClientGateway:
                 self.process_article(article)
             elif message_type == message_protocol.external.MsgType.END_OF_RECORDS:
                 self.send_eof(False)
+                message_protocol.external.send_msg(self.client_socket, message_protocol.external.MsgType.ACK)
                 return
             else:
                 raise ValueError("Expected an article or end of records")
