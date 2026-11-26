@@ -151,26 +151,35 @@ class Gateway:
         filter_exchange = None
         splitter_exchange = None
         client_wal = None
+        client_disconnected = False
         article_index = 0
         try:
             if sigterm_received.value:
                 return
             client_wal = WriteAheadLog(f"{STORAGE_PATH}/gateway_client_{client_id}.wal")
-            message_protocol.external.send_msg(
-                client_socket, message_protocol.external.MsgType.CLIENT_ID, client_id
-            )
-            message_protocol.external.send_msg(
-                client_socket, message_protocol.external.MsgType.HANDLER_ADDRESS,
-                HANDLER_HOST, HANDLER_PORT,
-            )
             filter_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
                 MOM_HOST, FILTER_PREFIX, [f"{index}" for index in range(FILTER_AMOUNT)], consume=False
             )
             splitter_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
                 MOM_HOST, SPLITTER_PREFIX, [f"{index}" for index in range(SPLITTER_AMOUNT)], consume=False
             )
+            try:
+                message_protocol.external.send_msg(
+                    client_socket, message_protocol.external.MsgType.CLIENT_ID, client_id
+                )
+                message_protocol.external.send_msg(
+                    client_socket, message_protocol.external.MsgType.HANDLER_ADDRESS,
+                    HANDLER_HOST, HANDLER_PORT,
+                )
+            except OSError:
+                client_disconnected = True
+                raise
             while not sigterm_received.value:
-                message_type, fields = message_protocol.external.recv_msg(client_socket)
+                try:
+                    message_type, fields = message_protocol.external.recv_msg(client_socket)
+                except (OSError, EOFError):
+                    client_disconnected = True
+                    raise
                 if message_type not in (
                     message_protocol.external.MsgType.ARTICLE,
                     message_protocol.external.MsgType.END_OF_RECORDS,
@@ -206,7 +215,19 @@ class Gateway:
 
         except (socket.error, EOFError) as e:
             if not sigterm_received.value:
-                logging.error("Client %s disconnected: %s", client_id, e)
+                if client_disconnected:
+                    logging.info("Client %s disconnected: %s", client_id, e)
+                    try:
+                        message_id = uuid4().bytes
+                        end_of_records = message_protocol.internal.serialize_msg(
+                            message_protocol.internal.MsgType.END_OF_RECORDS,
+                            client_id, message_id, "gateway", message_id, True,
+                        )
+                        Gateway.send_eof(client_wal, end_of_records, filter_exchange, splitter_exchange)
+                    except Exception:
+                        logging.exception("Could not send disconnected EOF for client %s", client_id)
+                else:
+                    logging.error("Gateway failed for client %s: %s", client_id, e)
         except Exception as e:
             logging.error("Client %s: %s", client_id, e)
         finally:
@@ -220,8 +241,10 @@ class Gateway:
                 client_socket.shutdown(socket.SHUT_RDWR)
             except socket.error as e:
                 pass
-            client_socket.close()
-            client_dict.pop(client_id, None)
+            try:
+                client_socket.close()
+            finally:
+                client_dict.pop(client_id, None)
 
     def receive_client(self):
         with multiprocessing.Manager() as manager:
