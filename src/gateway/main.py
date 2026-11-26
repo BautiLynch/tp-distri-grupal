@@ -12,7 +12,7 @@ from common.heartbeat import HeartbeatSender
 from common import middleware, message_protocol
 from common.message_protocol.fields import decode_fields, encode_fields
 from common.storage.wal import PROCESSED, WriteAheadLog
-from helpers import preprocess_article, parse_article
+from client_gateway import ClientGateway, publish_eof
 
 SERVER_HOST = os.environ["SERVER_HOST"]
 SERVER_PORT = int(os.environ["SERVER_PORT"])
@@ -23,8 +23,6 @@ FILTER_PREFIX = os.environ["FILTER_PREFIX"]
 FILTER_AMOUNT = int(os.environ["FILTER_AMOUNT"])
 SPLITTER_PREFIX = os.environ["SPLITTER_PREFIX"]
 SPLITTER_AMOUNT = int(os.environ["SPLITTER_AMOUNT"])
-HANDLER_HOST = os.environ["HANDLER_HOST"]
-HANDLER_PORT = int(os.environ["HANDLER_PORT"])
 STORAGE_PATH = os.environ.get("STORAGE_PATH", "storage")
 
 if FILTER_AMOUNT < 1:
@@ -104,7 +102,7 @@ class Gateway:
                         raise ValueError(f"Invalid pending EOF in {path}")
                 wal = WriteAheadLog(path)
                 try:
-                    self.send_eof(wal, pending_eof, filter_exchange, splitter_exchange)
+                    publish_eof(wal, pending_eof, filter_exchange, splitter_exchange)
                 finally:
                     wal.close()
                 logging.info("Recovered pending EOF for client %s", client_id)
@@ -125,15 +123,6 @@ class Gateway:
         finally:
             wal.close()
 
-    @staticmethod
-    def send_eof(wal, message, filter_exchange, splitter_exchange):
-        wal.save(encode_fields("EOF_R", message))
-        filter_exchange.send(message)
-        splitter_exchange.send(message)
-        wal.mark_processed()
-        wal.save(encode_fields("EOF_S"))
-        wal.mark_processed()
-
     def handle_sigterm(self, signum, frame):
         self.shutdown_requested.set()
 
@@ -148,101 +137,24 @@ class Gateway:
 
     @staticmethod
     def handle_client_request(client_socket, client_id, client_dict, sigterm_received):
-        filter_exchange = None
-        splitter_exchange = None
-        client_wal = None
-        client_disconnected = False
-        article_index = 0
+        client = ClientGateway(client_socket, client_id, sigterm_received)
         try:
-            if sigterm_received.value:
-                return
-            client_wal = WriteAheadLog(f"{STORAGE_PATH}/gateway_client_{client_id}.wal")
-            filter_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-                MOM_HOST, FILTER_PREFIX, [f"{index}" for index in range(FILTER_AMOUNT)], consume=False
-            )
-            splitter_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-                MOM_HOST, SPLITTER_PREFIX, [f"{index}" for index in range(SPLITTER_AMOUNT)], consume=False
-            )
-            try:
-                message_protocol.external.send_msg(
-                    client_socket, message_protocol.external.MsgType.CLIENT_ID, client_id
-                )
-                message_protocol.external.send_msg(
-                    client_socket, message_protocol.external.MsgType.HANDLER_ADDRESS,
-                    HANDLER_HOST, HANDLER_PORT,
-                )
-            except OSError:
-                client_disconnected = True
-                raise
-            while not sigterm_received.value:
-                try:
-                    message_type, fields = message_protocol.external.recv_msg(client_socket)
-                except (OSError, EOFError):
-                    client_disconnected = True
-                    raise
-                if message_type not in (
-                    message_protocol.external.MsgType.ARTICLE,
-                    message_protocol.external.MsgType.END_OF_RECORDS,
-                ):
-                    raise ValueError("Expected an article or end of records")
-                if message_type == message_protocol.external.MsgType.ARTICLE:
-                    article, = fields
-                    filtered_article, splitter_article = preprocess_article(parse_article(article))
-                    message_id = uuid4().bytes
-                    filtered = message_protocol.internal.serialize_msg(
-                        message_protocol.internal.MsgType.FILTER_ARTICLE,
-                        client_id, message_id, "gateway", message_id, *filtered_article,
-                    )
-                    filter_exchange.send_to(filtered, str(article_index % FILTER_AMOUNT))
-                    if splitter_article is not None:
-                        message_id = uuid4().bytes
-                        split = message_protocol.internal.serialize_msg(
-                            message_protocol.internal.MsgType.SPLITTER_ARTICLE,
-                            client_id, message_id, "gateway", message_id, *splitter_article,
-                        )
-                        splitter_exchange.send_to(split, str(article_index % SPLITTER_AMOUNT))
-                    article_index += 1
-                else:
-                    message_id = uuid4().bytes
-                    end_of_records = message_protocol.internal.serialize_msg(
-                        message_protocol.internal.MsgType.END_OF_RECORDS,
-                        client_id, message_id, "gateway", message_id, False,
-                    )
-                    Gateway.send_eof(client_wal, end_of_records, filter_exchange, splitter_exchange)
-
-                if message_type == message_protocol.external.MsgType.END_OF_RECORDS:
-                    break
-
-        except (socket.error, EOFError) as e:
+            client.run()
+        except (OSError, EOFError) as error:
             if not sigterm_received.value:
-                if client_disconnected:
-                    logging.info("Client %s disconnected: %s", client_id, e)
+                if client.disconnected:
+                    logging.info("Client %s disconnected: %s", client_id, error)
                     try:
-                        message_id = uuid4().bytes
-                        end_of_records = message_protocol.internal.serialize_msg(
-                            message_protocol.internal.MsgType.END_OF_RECORDS,
-                            client_id, message_id, "gateway", message_id, True,
-                        )
-                        Gateway.send_eof(client_wal, end_of_records, filter_exchange, splitter_exchange)
+                        client.send_eof(True)
                     except Exception:
                         logging.exception("Could not send disconnected EOF for client %s", client_id)
                 else:
-                    logging.error("Gateway failed for client %s: %s", client_id, e)
-        except Exception as e:
-            logging.error("Client %s: %s", client_id, e)
+                    logging.error("Gateway failed for client %s: %s", client_id, error)
+        except Exception:
+            logging.exception("Could not process client %s", client_id)
         finally:
-            for mom in (filter_exchange, splitter_exchange, client_wal):
-                if mom is not None:
-                    try:
-                        mom.close()
-                    except Exception:
-                        logging.exception("Could not close a gateway client resource")
             try:
-                client_socket.shutdown(socket.SHUT_RDWR)
-            except socket.error as e:
-                pass
-            try:
-                client_socket.close()
+                client.close()
             finally:
                 client_dict.pop(client_id, None)
 
