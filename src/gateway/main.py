@@ -4,14 +4,17 @@ import os
 import signal
 import socket
 import sys
+import threading
 from uuid import uuid4
 
+from common.heartbeat import HeartbeatSender
 from common import middleware, message_protocol
-
 from helpers import preprocess_article, parse_article
 
 SERVER_HOST = os.environ["SERVER_HOST"]
 SERVER_PORT = int(os.environ["SERVER_PORT"])
+HEARTBEAT_QUEUE = os.environ["HEARTBEAT_QUEUE"]
+HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 MOM_HOST = os.environ["MOM_HOST"]
 FILTER_PREFIX = os.environ["FILTER_PREFIX"]
 FILTER_AMOUNT = int(os.environ["FILTER_AMOUNT"])
@@ -25,137 +28,175 @@ if FILTER_AMOUNT < 1:
 if SPLITTER_AMOUNT < 1:
     raise ValueError("SPLITTER_AMOUNT must be greater than zero")
 
-def handle_client_request(client_socket, client_id, client_dict, sigterm_received):
-    filter_exchange = None
-    splitter_exchange = None
-    article_index = 0
-    try:
-        message_protocol.external.send_msg(
-            client_socket, message_protocol.external.MsgType.CLIENT_ID, client_id
+
+def initialize_worker():
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+
+class Gateway:
+    def __init__(self):
+        self.heartbeat = HeartbeatSender(
+            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), "gateway", HEARTBEAT_INTERVAL
         )
-        message_protocol.external.send_msg(
-            client_socket, message_protocol.external.MsgType.HANDLER_ADDRESS,
-            HANDLER_HOST, HANDLER_PORT,
-        )
-        filter_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, FILTER_PREFIX, [f"{index}" for index in range(FILTER_AMOUNT)], consume=False
-        )
-        splitter_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, SPLITTER_PREFIX, [f"{index}" for index in range(SPLITTER_AMOUNT)], consume=False
-        )
-        while True:
-            message_type, fields = message_protocol.external.recv_msg(client_socket)
-            if message_type not in (
-                message_protocol.external.MsgType.ARTICLE,
-                message_protocol.external.MsgType.END_OF_RECORDS,
-            ):
-                raise ValueError("Expected an article or end of records")
-            if message_type == message_protocol.external.MsgType.ARTICLE:
-                article, = fields
-                filtered_article, splitter_article = preprocess_article(parse_article(article))
-                message_id = uuid4().bytes
-                filtered = message_protocol.internal.serialize_msg(
-                    message_protocol.internal.MsgType.FILTER_ARTICLE,
-                    client_id, message_id, "gateway", message_id, *filtered_article,
-                )
-                filter_exchange.send_to(filtered, str(article_index % FILTER_AMOUNT))
-                if splitter_article is not None:
+        self.shutdown_requested = threading.Event()
+        signal.signal(signal.SIGTERM, self.handle_sigterm)
+        signal.signal(signal.SIGINT, self.handle_sigterm)
+
+    def handle_sigterm(self, signum, frame):
+        self.shutdown_requested.set()
+
+    @staticmethod
+    def stop_clients(client_dict, sigterm_received):
+        sigterm_received.value = 1
+        for connection in list(client_dict.values()):
+            try:
+                connection.shutdown(socket.SHUT_RDWR)
+            except socket.error as error:
+                logging.debug("Client already disconnected during shutdown: %s", error)
+
+    @staticmethod
+    def handle_client_request(client_socket, client_id, client_dict, sigterm_received):
+        filter_exchange = None
+        splitter_exchange = None
+        article_index = 0
+        try:
+            if sigterm_received.value:
+                return
+            message_protocol.external.send_msg(
+                client_socket, message_protocol.external.MsgType.CLIENT_ID, client_id
+            )
+            message_protocol.external.send_msg(
+                client_socket, message_protocol.external.MsgType.HANDLER_ADDRESS,
+                HANDLER_HOST, HANDLER_PORT,
+            )
+            filter_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+                MOM_HOST, FILTER_PREFIX, [f"{index}" for index in range(FILTER_AMOUNT)], consume=False
+            )
+            splitter_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+                MOM_HOST, SPLITTER_PREFIX, [f"{index}" for index in range(SPLITTER_AMOUNT)], consume=False
+            )
+            while not sigterm_received.value:
+                message_type, fields = message_protocol.external.recv_msg(client_socket)
+                if message_type not in (
+                    message_protocol.external.MsgType.ARTICLE,
+                    message_protocol.external.MsgType.END_OF_RECORDS,
+                ):
+                    raise ValueError("Expected an article or end of records")
+                if message_type == message_protocol.external.MsgType.ARTICLE:
+                    article, = fields
+                    filtered_article, splitter_article = preprocess_article(parse_article(article))
                     message_id = uuid4().bytes
-                    split = message_protocol.internal.serialize_msg(
-                        message_protocol.internal.MsgType.SPLITTER_ARTICLE,
-                        client_id, message_id, "gateway", message_id, *splitter_article,
+                    filtered = message_protocol.internal.serialize_msg(
+                        message_protocol.internal.MsgType.FILTER_ARTICLE,
+                        client_id, message_id, "gateway", message_id, *filtered_article,
                     )
-                    splitter_exchange.send_to(split, str(article_index % SPLITTER_AMOUNT))
-                article_index += 1
-            else:
-                message_id = uuid4().bytes
-                end_of_records = message_protocol.internal.serialize_msg(
-                    message_protocol.internal.MsgType.END_OF_RECORDS,
-                    client_id, message_id, "gateway", message_id,
-                )
-                filter_exchange.send(end_of_records)
-                splitter_exchange.send(end_of_records)
-                    
-            if message_type == message_protocol.external.MsgType.END_OF_RECORDS:
-                break
+                    filter_exchange.send_to(filtered, str(article_index % FILTER_AMOUNT))
+                    if splitter_article is not None:
+                        message_id = uuid4().bytes
+                        split = message_protocol.internal.serialize_msg(
+                            message_protocol.internal.MsgType.SPLITTER_ARTICLE,
+                            client_id, message_id, "gateway", message_id, *splitter_article,
+                        )
+                        splitter_exchange.send_to(split, str(article_index % SPLITTER_AMOUNT))
+                    article_index += 1
+                else:
+                    message_id = uuid4().bytes
+                    end_of_records = message_protocol.internal.serialize_msg(
+                        message_protocol.internal.MsgType.END_OF_RECORDS,
+                        client_id, message_id, "gateway", message_id,
+                    )
+                    filter_exchange.send(end_of_records)
+                    splitter_exchange.send(end_of_records)
 
-    except (socket.error, EOFError) as e:
-        if not sigterm_received.value:
-            logging.error("Client %s disconnected: %s", client_id, e)
-    except Exception as e:
-        logging.error("Client %s: %s", client_id, e)
-    finally:
-        for mom in (filter_exchange, splitter_exchange):
-            if mom is not None:
-                try:
-                    mom.close()
-                except Exception:
-                    logging.exception("Could not close a gateway output connection")
+                if message_type == message_protocol.external.MsgType.END_OF_RECORDS:
+                    break
+
+        except (socket.error, EOFError) as e:
+            if not sigterm_received.value:
+                logging.error("Client %s disconnected: %s", client_id, e)
+        except Exception as e:
+            logging.error("Client %s: %s", client_id, e)
+        finally:
+            for mom in (filter_exchange, splitter_exchange):
+                if mom is not None:
+                    try:
+                        mom.close()
+                    except Exception:
+                        logging.exception("Could not close a gateway output connection")
+            try:
+                client_socket.shutdown(socket.SHUT_RDWR)
+            except socket.error as e:
+                pass
+            client_socket.close()
+            client_dict.pop(client_id, None)
+
+    def receive_client(self):
+        with multiprocessing.Manager() as manager:
+            client_dict = manager.dict()
+            sigterm_received = manager.Value("c_short", 0)
+            with multiprocessing.Pool(
+                processes=os.process_cpu_count(), initializer=initialize_worker,
+            ) as processes_pool:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+                    server_socket.bind((SERVER_HOST, SERVER_PORT))
+                    server_socket.listen()
+                    server_socket.settimeout(0.5)
+                    client_id = 0
+                    try:
+                        if not self.shutdown_requested.is_set():
+                            self.heartbeat.start()
+                        while not self.shutdown_requested.is_set():
+                            try:
+                                client_socket, _ = server_socket.accept()
+
+                                logging.info("A new client has connected")
+                                client_id += 1
+                                client_dict[client_id] = client_socket
+                                processes_pool.apply_async(
+                                    Gateway.handle_client_request,
+                                    (client_socket, client_id, client_dict, sigterm_received),
+                                    callback=lambda _, connection=client_socket: connection.close(),
+                                    error_callback=lambda error, connection=client_socket: (
+                                        connection.close(),
+                                        logging.error("Gateway worker failed: %s", error),
+                                    ),
+                                )
+                            except socket.timeout:
+                                continue
+                            except socket.error:
+                                if not self.shutdown_requested.is_set():
+                                    logging.exception("The connection with the client was lost")
+                                    return 1
+                                else:
+                                    return 0
+                            except Exception:
+                                logging.exception("Error accepting a client")
+                                return 2
+                    finally:
+                        self.stop_clients(client_dict, sigterm_received)
+                        processes_pool.close()
+                        processes_pool.join()
+        return 0
+
+    def close(self):
+        self.shutdown_requested.set()
+        self.heartbeat.stop()
+
+    def start(self):
         try:
-            client_socket.shutdown(socket.SHUT_RDWR)
-        except socket.error as e:
-            pass
-        client_socket.close()
-        client_dict.pop(client_id, None)
-
-
-def handle_sigterm(server_socket, client_dict, sigterm_received):
-    sigterm_received.value = 1
-    for connection in [server_socket, *client_dict.values()]:
-        try:
-            connection.shutdown(socket.SHUT_RDWR)
-        except socket.error as e:
-            pass
-
+            return self.receive_client()
+        finally:
+            self.close()
 
 def main():
     logging.basicConfig(
-        level=logging.INFO,
+        level=os.environ.get("LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s.%(msecs)03d | %(levelname)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-
-    with multiprocessing.Manager() as manager:
-        client_dict = manager.dict()
-        sigterm_received = manager.Value("c_short", 0)
-        with multiprocessing.Pool(processes=os.process_cpu_count()) as processes_pool: 
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-                server_socket.bind((SERVER_HOST, SERVER_PORT))
-                server_socket.listen()
-                signal.signal(
-                    signal.SIGTERM,
-                    lambda signum, frame: handle_sigterm(
-                        server_socket, client_dict, sigterm_received
-                    ),
-                )
-                client_id = 0
-                try:
-                    while True:
-                        try:
-                            client_socket, _ = server_socket.accept()
-
-                            logging.info("A new client has connected")
-                            client_id += 1
-                            client_dict[client_id] = client_socket
-                            processes_pool.apply_async(
-                                handle_client_request,
-                                (client_socket, client_id, client_dict, sigterm_received),
-                                callback=lambda _, connection=client_socket: connection.close(),
-                            )
-                        except socket.error:
-                            if sigterm_received.value == 0:
-                                logging.exception("The connection with the client was lost")
-                                return 1
-                            else:
-                                return 0
-                        except Exception:
-                            logging.exception("Error accepting a client")
-                            return 2
-                finally:
-                    handle_sigterm(server_socket, client_dict, sigterm_received)
-                    processes_pool.close()
-                    processes_pool.join()
-    return 0
+    gateway = Gateway()
+    return gateway.start()
 
 
 if __name__ == "__main__":

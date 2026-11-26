@@ -33,7 +33,7 @@ make test
 
 Levanta el sistema, muestra los logs, espera a que terminen los clientes, verifica sus resultados contra la referencia y baja los contenedores. El resultado queda en `verificacion.log` y los logs en `ejecucion.log`.
 
-Para activar los logs de debug, ejecutá `make test LOG_LEVEL=DEBUG`.
+El nivel de logs por defecto es `INFO`. Para activar debug, ejecutá `make up LOG_LEVEL=DEBUG` o `make test LOG_LEVEL=DEBUG`.
 
 Cada cliente guarda su salida en `output/cliente_<n>/`:
 

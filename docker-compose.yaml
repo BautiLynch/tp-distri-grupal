@@ -603,6 +603,7 @@ services:
       FILTER_PREFIX: filter
       HANDLER_HOST: handler
       HANDLER_PORT: "5679"
+      HEARTBEAT_QUEUE: heartbeat
       MOM_HOST: rabbitmq
       PYTHONUNBUFFERED: "1"
       SERVER_HOST: 0.0.0.0
@@ -619,6 +620,7 @@ services:
         required: true
     environment:
       INPUT_EXCHANGE: results
+      HEARTBEAT_QUEUE: heartbeat
       MOM_HOST: rabbitmq
       PYTHONUNBUFFERED: "1"
       QUERY_1_REPLICAS: "3"
@@ -642,7 +644,6 @@ services:
       ID: "0"
       IMAGE_TIMEOUT: "10"
       INPUT_EXCHANGE: image_getter
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: results
       PYTHONUNBUFFERED: "1"

@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -o pipefail -c
 REFERENCIA ?= test/referencia.json
-export LOG_LEVEL
+export LOG_LEVEL ?= INFO
 
 # Configuracion del chaos monkey (make chaos). Se pueden pisar al invocar:
 # make chaos CHAOS_INTERVAL=5 CHAOS_TARGETS=splitter,aggregation
