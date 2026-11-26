@@ -32,6 +32,90 @@ def initialize_worker():
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
+class ClientHandler:
+    def __init__(self, client_socket):
+        self.client_socket = client_socket
+        self.client_id = None
+        self.input_exchange = None
+        self.query_end_counts = {query_id: 0 for query_id in QueryId}
+        self.completed_queries = set()
+        self.finished = False
+        self.stopping = False
+        self.last_received = {}
+        signal.signal(signal.SIGTERM, self.handle_sigterm)
+
+    def run(self):
+        if self.stopping:
+            return
+        message_type, fields = recv_msg(self.client_socket)
+        if message_type != ExternalMsgType.CLIENT_ID:
+            raise ValueError("Expected a client ID to register the connection")
+        self.client_id, = fields
+        if self.stopping:
+            return
+        self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, INPUT_EXCHANGE, [str(self.client_id)], consume=True
+        )
+        if self.stopping:
+            return
+        send_msg(self.client_socket, ExternalMsgType.ACK)
+        self.input_exchange.start_consuming(self.handle_result)
+
+    def handle_result(self, message, ack, nack):
+        try:
+            message_type, fields = deserialize_msg(message)
+            client_id, message_id, producer_id, key, *fields = fields
+            producer = (client_id, producer_id)
+            if self.last_received.get(producer) == key:
+                ack()
+                return
+            if message_type == InternalMsgType.QUERY_END:
+                query_id = QueryId(fields[0])
+                self.query_end_counts[query_id] += 1
+                if self.query_end_counts[query_id] == QUERY_REPLICAS[query_id]:
+                    logging.info(
+                        "Client %s completed query %s", self.client_id, query_id.name,
+                    )
+                    self.completed_queries.add(query_id)
+                self.finished = len(self.completed_queries) == len(QUERY_REPLICAS)
+                if self.finished:
+                    send_msg(self.client_socket, ExternalMsgType.END_OF_RECORDS, False)
+            elif message_type == InternalMsgType.RESULT:
+                send_msg(self.client_socket, ExternalMsgType.RESULT, *fields)
+            else:
+                raise ValueError(f"Unexpected handler message type: {message_type}")
+        except Exception:
+            nack()
+            raise
+        self.last_received[producer] = key
+        ack()
+        if self.finished:
+            self.input_exchange.stop_consuming()
+
+    def handle_sigterm(self, signum, frame):
+        if self.stopping:
+            return
+        self.stopping = True
+        self.shutdown_socket()
+        if self.input_exchange is not None:
+            self.input_exchange.stop_consuming_threadsafe()
+
+    def shutdown_socket(self):
+        try:
+            self.client_socket.shutdown(socket.SHUT_RDWR)
+        except socket.error as error:
+            logging.debug("Client already disconnected: %s", error)
+
+    def close(self):
+        if self.input_exchange is not None:
+            try:
+                self.input_exchange.close()
+            except Exception:
+                logging.exception("Could not close the client's result connection")
+        self.shutdown_socket()
+        self.client_socket.close()
+
+
 class Handler:
     def __init__(self):
         self.heartbeat = HeartbeatSender(
@@ -46,110 +130,21 @@ class Handler:
 
     @staticmethod
     def handle_client_response(client_socket, connection_id, client_dict, worker_pids, sigterm_received):
-        client_id = None
-        input_exchange = None
-        query_end_counts = {query_id: 0 for query_id in QueryId}
-        completed_queries = set()
-        finished = False
-        stopping = False
-        last_received = {}
-
-        def shutdown_socket():
-            try:
-                client_socket.shutdown(socket.SHUT_RDWR)
-            except socket.error as error:
-                logging.debug("Client already disconnected: %s", error)
-
-        def request_shutdown(signum, frame):
-            nonlocal stopping
-            if stopping:
-                return
-            stopping = True
-            shutdown_socket()
-            if input_exchange is not None:
-                input_exchange.stop_consuming_threadsafe()
-
-        def handle_result(message, ack, nack):
-            nonlocal finished
-            try:
-                message_type, fields = (
-                    deserialize_msg(message)
-                )
-                client_id, message_id, producer_id, key, *fields = fields
-                producer = (client_id, producer_id)
-                if last_received.get(producer) == key:
-                    ack()
-                    return
-                if message_type == InternalMsgType.QUERY_END:
-                    query_id = QueryId(fields[0])
-                    query_end_counts[query_id] += 1
-                    if query_end_counts[query_id] == QUERY_REPLICAS[query_id]:
-                        logging.info(
-                            "Client %s completed query %s",
-                            client_id,
-                            query_id.name,
-                        )
-                        completed_queries.add(query_id)
-                    finished = len(completed_queries) == len(QUERY_REPLICAS)
-                    if finished:
-                        send_msg(
-                            client_socket,
-                            ExternalMsgType.END_OF_RECORDS,
-                            False,
-                        )
-                elif message_type == InternalMsgType.RESULT:
-                    send_msg(client_socket, ExternalMsgType.RESULT, *fields)
-                else:
-                    raise ValueError(f"Unexpected handler message type: {message_type}")
-            except Exception:
-                nack()
-                raise
-            last_received[producer] = key
-            ack()
-            if finished:
-                input_exchange.stop_consuming()
-
-        signal.signal(signal.SIGTERM, request_shutdown)
+        client_handler = ClientHandler(client_socket)
         try:
             worker_pids[connection_id] = os.getpid()
-            if sigterm_received.value or stopping:
-                return
-            message_type, fields = recv_msg(
-                client_socket
-            )
-            if message_type != ExternalMsgType.CLIENT_ID:
-                raise ValueError("Expected a client ID to register the connection")
-            client_id, = fields
-            if stopping:
-                return
-            input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-                MOM_HOST, INPUT_EXCHANGE, [str(client_id)], consume=True
-            )
-            if stopping:
-                return
-
-            send_msg(
-                client_socket,
-                ExternalMsgType.ACK,
-            )
-            input_exchange.start_consuming(handle_result)
+            if not sigterm_received.value and not client_handler.stopping:
+                client_handler.run()
         except (ConnectionError, EOFError):
             logging.info("Client connection %s closed by the client", connection_id)
         except Exception:
-            if not stopping:
+            if not client_handler.stopping:
                 logging.exception("Client connection %s failed", connection_id)
         finally:
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
-            if input_exchange is not None:
-                try:
-                    input_exchange.close()
-                except Exception:
-                    logging.exception("Could not close the client's result connection")
-            shutdown_socket()
-            client_socket.close()
+            client_handler.close()
             client_dict.pop(connection_id, None)
             worker_pids.pop(connection_id, None)
-
 
     @staticmethod
     def stop_clients(client_dict, worker_pids, sigterm_received):
