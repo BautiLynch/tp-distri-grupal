@@ -13,7 +13,8 @@ from common.message_protocol.internal import deserialize_msg, MsgType
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
-HEARTBEAT_QUEUE = os.environ["HEARTBEAT_QUEUE"]
+MONITOR_AMOUNT = int(os.environ["MONITOR_AMOUNT"])
+HEARTBEAT_PORT = int(os.environ["HEARTBEAT_PORT"])
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 AVERAGE_PREFIX = os.environ["AVERAGE_PREFIX"]
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
@@ -29,7 +30,7 @@ class Average:
 
     def __init__(self):
         self.heartbeat = HeartbeatSender(
-            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"average_{ID}", HEARTBEAT_INTERVAL
+            MONITOR_AMOUNT, HEARTBEAT_PORT, socket.gethostname(), f"average_{ID}", HEARTBEAT_INTERVAL
         )
         self.shutdown = GracefulShutdown()
         self.last_received = {}
