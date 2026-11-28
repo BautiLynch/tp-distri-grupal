@@ -1,6 +1,5 @@
 from datetime import datetime
 import os
-import socket
 import logging
 import sys
 
@@ -13,7 +12,7 @@ from common.message_protocol.internal import deserialize_msg, MsgType
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
-MONITOR_AMOUNT = int(os.environ["MONITOR_AMOUNT"])
+MONITOR_IPS = os.environ["MONITOR_IPS"].split(",")
 HEARTBEAT_PORT = int(os.environ["HEARTBEAT_PORT"])
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 AVERAGE_PREFIX = os.environ["AVERAGE_PREFIX"]
@@ -30,7 +29,7 @@ class Average:
 
     def __init__(self):
         self.heartbeat = HeartbeatSender(
-            MONITOR_AMOUNT, HEARTBEAT_PORT, socket.gethostname(), f"average_{ID}", HEARTBEAT_INTERVAL
+            MONITOR_IPS, HEARTBEAT_PORT, f"average_{ID}", HEARTBEAT_INTERVAL
         )
         self.shutdown = GracefulShutdown()
         self.last_received = {}

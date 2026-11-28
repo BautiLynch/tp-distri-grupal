@@ -1,6 +1,5 @@
 import os
 import logging
-import socket
 import sys
 
 from datetime import datetime
@@ -13,7 +12,7 @@ from common.message_protocol.queries import QueryId
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
-MONITOR_AMOUNT = int(os.environ["MONITOR_AMOUNT"])
+MONITOR_IPS = os.environ["MONITOR_IPS"].split(",")
 HEARTBEAT_PORT = int(os.environ["HEARTBEAT_PORT"])
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
@@ -30,7 +29,7 @@ class FilterYearPlus:
     def __init__(self):
 
         self.heartbeat = HeartbeatSender(
-            MONITOR_AMOUNT, HEARTBEAT_PORT, socket.gethostname(), f"filter_{ID}", HEARTBEAT_INTERVAL
+            MONITOR_IPS, HEARTBEAT_PORT, f"filter_{ID}", HEARTBEAT_INTERVAL
         )
 
         self.shutdown = GracefulShutdown()

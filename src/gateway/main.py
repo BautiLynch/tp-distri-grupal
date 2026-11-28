@@ -16,7 +16,7 @@ from client_gateway import ClientGateway, publish_eof
 
 SERVER_HOST = os.environ["SERVER_HOST"]
 SERVER_PORT = int(os.environ["SERVER_PORT"])
-MONITOR_AMOUNT = int(os.environ["MONITOR_AMOUNT"])
+MONITOR_IPS = os.environ["MONITOR_IPS"].split(",")
 HEARTBEAT_PORT = int(os.environ["HEARTBEAT_PORT"])
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 MOM_HOST = os.environ["MOM_HOST"]
@@ -40,7 +40,7 @@ def initialize_worker():
 class Gateway:
     def __init__(self):
         self.heartbeat = HeartbeatSender(
-            MONITOR_AMOUNT, HEARTBEAT_PORT, socket.gethostname(), "gateway", HEARTBEAT_INTERVAL
+            MONITOR_IPS, HEARTBEAT_PORT, "gateway", HEARTBEAT_INTERVAL
         )
         self.shutdown_requested = threading.Event()
         signal.signal(signal.SIGTERM, self.handle_sigterm)

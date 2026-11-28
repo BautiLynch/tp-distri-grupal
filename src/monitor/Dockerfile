@@ -1,6 +1,6 @@
 FROM python:3-alpine
 
-RUN pip3 install pika docker
+RUN pip3 install docker
 
 COPY common ./common
 COPY monitor .

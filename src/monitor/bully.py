@@ -42,7 +42,6 @@ class BullyElection:
             self._thread.join()
 
     def leader_lost(self, leader):
-        """El gossip dejo de recibir al lider."""
         with self._condition:
             if self._leader != leader:
                 return
@@ -136,7 +135,7 @@ class BullyElection:
                 if self._stopping:
                     return
                 if not self._in_progress:
-                    pass  # Llego un COORDINATOR mientras esperaba.
+                    pass
                 elif not self._answered:
                     logging.info("No higher monitor answered: I am the leader")
                     self._set_leader_locked(self.my_id)
