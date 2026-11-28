@@ -1,8 +1,15 @@
 networks:
   default:
     name: tp-distri-grupal-network
+    ipam:
+      config:
+        # Las IPs dinamicas salen de ip_range (172.28.128.0 - 172.28.255.255).
+        # La mitad baja queda para IPs fijas: los monitores usan 172.28.0.10, .11, .12, ...
+        - subnet: 172.28.0.0/16
+          ip_range: 172.28.128.0/17
 services:
   aggregation_0:
+    container_name: aggregation_0
     build:
       context: ./src
       dockerfile: aggregation/Dockerfile
@@ -10,14 +17,11 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "0"
       INPUT_EXCHANGE: splitter_output
-      MOM_HOST: rabbitmq
       OUTPUT_QUEUE: join_queue
-      PYTHONUNBUFFERED: "1"
       SPLITTER_AMOUNT: "3"
       STORAGE_PATH: /storage
       TOP_SIZE: "20"
@@ -27,6 +31,7 @@ services:
         type: volume
         volume: {}
   aggregation_1:
+    container_name: aggregation_1
     build:
       context: ./src
       dockerfile: aggregation/Dockerfile
@@ -34,14 +39,11 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "1"
       INPUT_EXCHANGE: splitter_output
-      MOM_HOST: rabbitmq
       OUTPUT_QUEUE: join_queue
-      PYTHONUNBUFFERED: "1"
       SPLITTER_AMOUNT: "3"
       STORAGE_PATH: /storage
       TOP_SIZE: "20"
@@ -51,6 +53,7 @@ services:
         type: volume
         volume: {}
   aggregation_2:
+    container_name: aggregation_2
     build:
       context: ./src
       dockerfile: aggregation/Dockerfile
@@ -58,14 +61,11 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "2"
       INPUT_EXCHANGE: splitter_output
-      MOM_HOST: rabbitmq
       OUTPUT_QUEUE: join_queue
-      PYTHONUNBUFFERED: "1"
       SPLITTER_AMOUNT: "3"
       STORAGE_PATH: /storage
       TOP_SIZE: "20"
@@ -75,6 +75,7 @@ services:
         type: volume
         volume: {}
   average_0:
+    container_name: average_0
     build:
       context: ./src
       dockerfile: average/Dockerfile
@@ -82,17 +83,14 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
       AVERAGE_PREFIX: average
       FILTER_AVERAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "0"
       INPUT_EXCHANGE: average
-      MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: filter_average
-      PYTHONUNBUFFERED: "1"
       STORAGE_PATH: /storage
       YEAR: "2021"
     volumes:
@@ -101,6 +99,7 @@ services:
         type: volume
         volume: {}
   average_1:
+    container_name: average_1
     build:
       context: ./src
       dockerfile: average/Dockerfile
@@ -108,17 +107,14 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
       AVERAGE_PREFIX: average
       FILTER_AVERAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "1"
       INPUT_EXCHANGE: average
-      MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: filter_average
-      PYTHONUNBUFFERED: "1"
       STORAGE_PATH: /storage
       YEAR: "2021"
     volumes:
@@ -127,6 +123,7 @@ services:
         type: volume
         volume: {}
   average_2:
+    container_name: average_2
     build:
       context: ./src
       dockerfile: average/Dockerfile
@@ -134,17 +131,14 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
       AVERAGE_PREFIX: average
       FILTER_AVERAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "2"
       INPUT_EXCHANGE: average
-      MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: filter_average
-      PYTHONUNBUFFERED: "1"
       STORAGE_PATH: /storage
       YEAR: "2021"
     volumes:
@@ -246,6 +240,7 @@ services:
         target: /output
         type: bind
   filter_0:
+    container_name: filter_0
     build:
       context: ./src
       dockerfile: filter/Dockerfile
@@ -253,21 +248,19 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "0"
       IMAGE_GETTER_AMOUNT: "1"
       IMAGE_GETTER_PREFIX: image_getter
       INPUT_EXCHANGE: filter
       LANGUAGE: en
-      MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE_1: results
       OUTPUT_EXCHANGE_2: image_getter
-      PYTHONUNBUFFERED: "1"
       SECTIONS: Biography,Biographie
       YEAR: "2020"
   filter_1:
+    container_name: filter_1
     build:
       context: ./src
       dockerfile: filter/Dockerfile
@@ -275,21 +268,19 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "1"
       IMAGE_GETTER_AMOUNT: "1"
       IMAGE_GETTER_PREFIX: image_getter
       INPUT_EXCHANGE: filter
       LANGUAGE: en
-      MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE_1: results
       OUTPUT_EXCHANGE_2: image_getter
-      PYTHONUNBUFFERED: "1"
       SECTIONS: Biography,Biographie
       YEAR: "2020"
   filter_2:
+    container_name: filter_2
     build:
       context: ./src
       dockerfile: filter/Dockerfile
@@ -297,21 +288,19 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "2"
       IMAGE_GETTER_AMOUNT: "1"
       IMAGE_GETTER_PREFIX: image_getter
       INPUT_EXCHANGE: filter
       LANGUAGE: en
-      MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE_1: results
       OUTPUT_EXCHANGE_2: image_getter
-      PYTHONUNBUFFERED: "1"
       SECTIONS: Biography,Biographie
       YEAR: "2020"
   filter_average_0:
+    container_name: filter_average_0
     build:
       context: ./src
       dockerfile: filter-average/Dockerfile
@@ -319,16 +308,13 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
       AVERAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "0"
       INPUT_EXCHANGE: filter_average
-      MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: results
-      PYTHONUNBUFFERED: "1"
       STORAGE_PATH: /storage
       YEAR: "2020"
     volumes:
@@ -337,6 +323,7 @@ services:
         type: volume
         volume: {}
   filter_average_1:
+    container_name: filter_average_1
     build:
       context: ./src
       dockerfile: filter-average/Dockerfile
@@ -344,16 +331,13 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
       AVERAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "1"
       INPUT_EXCHANGE: filter_average
-      MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: results
-      PYTHONUNBUFFERED: "1"
       STORAGE_PATH: /storage
       YEAR: "2020"
     volumes:
@@ -362,6 +346,7 @@ services:
         type: volume
         volume: {}
   filter_average_2:
+    container_name: filter_average_2
     build:
       context: ./src
       dockerfile: filter-average/Dockerfile
@@ -369,16 +354,13 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
       AVERAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "2"
       INPUT_EXCHANGE: filter_average
-      MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: results
-      PYTHONUNBUFFERED: "1"
       STORAGE_PATH: /storage
       YEAR: "2020"
     volumes:
@@ -387,6 +369,7 @@ services:
         type: volume
         volume: {}
   filter_language_0:
+    container_name: filter_language_0
     build:
       context: ./src
       dockerfile: filter-language/Dockerfile
@@ -394,14 +377,11 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "0"
       INPUT_EXCHANGE: splitter_output
-      MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: results
-      PYTHONUNBUFFERED: "1"
       SPLITTER_AMOUNT: "3"
       STORAGE_PATH: /storage
     volumes:
@@ -410,6 +390,7 @@ services:
         type: volume
         volume: {}
   filter_language_1:
+    container_name: filter_language_1
     build:
       context: ./src
       dockerfile: filter-language/Dockerfile
@@ -417,14 +398,11 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "1"
       INPUT_EXCHANGE: splitter_output
-      MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: results
-      PYTHONUNBUFFERED: "1"
       SPLITTER_AMOUNT: "3"
       STORAGE_PATH: /storage
     volumes:
@@ -433,6 +411,7 @@ services:
         type: volume
         volume: {}
   filter_language_2:
+    container_name: filter_language_2
     build:
       context: ./src
       dockerfile: filter-language/Dockerfile
@@ -440,14 +419,11 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "2"
       INPUT_EXCHANGE: splitter_output
-      MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: results
-      PYTHONUNBUFFERED: "1"
       SPLITTER_AMOUNT: "3"
       STORAGE_PATH: /storage
     volumes:
@@ -456,6 +432,7 @@ services:
         type: volume
         volume: {}
   filter_year_0:
+    container_name: filter_year_0
     build:
       context: ./src
       dockerfile: filter-year/Dockerfile
@@ -463,17 +440,14 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
       AVERAGE_AMOUNT: "3"
       AVERAGE_EXCHANGE: average
       FILTER_AVERAGE_AMOUNT: "3"
       FILTER_AVERAGE_EXCHANGE: filter_average
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "0"
       INPUT_EXCHANGE: splitter_output
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
       SPLITTER_AMOUNT: "3"
       STORAGE_PATH: /storage
       YEAR: "2020"
@@ -483,6 +457,7 @@ services:
         type: volume
         volume: {}
   filter_year_1:
+    container_name: filter_year_1
     build:
       context: ./src
       dockerfile: filter-year/Dockerfile
@@ -490,17 +465,14 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
       AVERAGE_AMOUNT: "3"
       AVERAGE_EXCHANGE: average
       FILTER_AVERAGE_AMOUNT: "3"
       FILTER_AVERAGE_EXCHANGE: filter_average
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "1"
       INPUT_EXCHANGE: splitter_output
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
       SPLITTER_AMOUNT: "3"
       STORAGE_PATH: /storage
       YEAR: "2020"
@@ -510,6 +482,7 @@ services:
         type: volume
         volume: {}
   filter_year_2:
+    container_name: filter_year_2
     build:
       context: ./src
       dockerfile: filter-year/Dockerfile
@@ -517,17 +490,14 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
       AVERAGE_AMOUNT: "3"
       AVERAGE_EXCHANGE: average
       FILTER_AVERAGE_AMOUNT: "3"
       FILTER_AVERAGE_EXCHANGE: filter_average
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "2"
       INPUT_EXCHANGE: splitter_output
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
       SPLITTER_AMOUNT: "3"
       STORAGE_PATH: /storage
       YEAR: "2020"
@@ -537,6 +507,7 @@ services:
         type: volume
         volume: {}
   gateway:
+    container_name: gateway
     build:
       context: ./src
       dockerfile: gateway/Dockerfile
@@ -616,15 +587,12 @@ services:
       splitter_2:
         condition: service_started
         required: true
+    env_file: .env
     environment:
       FILTER_AMOUNT: "3"
       FILTER_PREFIX: filter
       HANDLER_HOST: handler
       HANDLER_PORT: "5679"
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: "5678"
       STORAGE_PATH: /storage
@@ -636,6 +604,7 @@ services:
         type: volume
         volume: {}
   handler:
+    container_name: handler
     build:
       context: ./src
       dockerfile: handler/Dockerfile
@@ -643,12 +612,9 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
       INPUT_EXCHANGE: results
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
       QUERY_1_REPLICAS: "3"
       QUERY_2_REPLICAS: "1"
       QUERY_3_REPLICAS: "3"
@@ -657,6 +623,7 @@ services:
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: "5679"
   image_getter_0:
+    container_name: image_getter_0
     build:
       context: ./src
       dockerfile: image-getter/Dockerfile
@@ -664,17 +631,15 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
       FILTER_YEAR_PLUS_AMOUNT: "3"
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "0"
       IMAGE_TIMEOUT: "10"
       INPUT_EXCHANGE: image_getter
-      MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: results
-      PYTHONUNBUFFERED: "1"
   join:
+    container_name: join
     build:
       context: ./src
       dockerfile: join/Dockerfile
@@ -682,16 +647,17 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
       AGGREGATION_AMOUNT: "3"
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       INPUT_QUEUE: join_queue
-      MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: results
-      PYTHONUNBUFFERED: "1"
       TOP_SIZE: "20"
   monitor_0:
+    container_name: monitor_0
+    networks:
+      default:
+        ipv4_address: 172.28.0.10
     build:
       context: ./src
       dockerfile: monitor/Dockerfile
@@ -699,20 +665,18 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
       ID: "0"
-      HEARTBEAT_ALLOWED_MISSES: "3"
-      HEARTBEAT_INTERVAL: "5"
-      GOSSIP_EXCHANGE: monitor_gossip
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
     volumes:
       - source: /var/run/docker.sock
         target: /var/run/docker.sock
         type: bind
   monitor_1:
+    container_name: monitor_1
+    networks:
+      default:
+        ipv4_address: 172.28.0.11
     build:
       context: ./src
       dockerfile: monitor/Dockerfile
@@ -720,20 +684,18 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
       ID: "1"
-      HEARTBEAT_ALLOWED_MISSES: "3"
-      HEARTBEAT_INTERVAL: "5"
-      GOSSIP_EXCHANGE: monitor_gossip
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
     volumes:
       - source: /var/run/docker.sock
         target: /var/run/docker.sock
         type: bind
   monitor_2:
+    container_name: monitor_2
+    networks:
+      default:
+        ipv4_address: 172.28.0.12
     build:
       context: ./src
       dockerfile: monitor/Dockerfile
@@ -741,15 +703,9 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
       ID: "2"
-      HEARTBEAT_ALLOWED_MISSES: "3"
-      HEARTBEAT_INTERVAL: "5"
-      GOSSIP_EXCHANGE: monitor_gossip
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
-      MOM_HOST: rabbitmq
-      PYTHONUNBUFFERED: "1"
     volumes:
       - source: /var/run/docker.sock
         target: /var/run/docker.sock
@@ -780,6 +736,7 @@ services:
         target: /etc/rabbitmq/conf.d/20-logging.conf
         type: bind
   splitter_0:
+    container_name: splitter_0
     build:
       context: ./src
       dockerfile: splitter/Dockerfile
@@ -787,19 +744,17 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
       AGGREGATION_AMOUNT: "3"
       FILTER_LANGUAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "0"
       INPUT_EXCHANGE: splitter
-      MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: splitter_output
-      PYTHONUNBUFFERED: "1"
       STOPWORDS_PATH: /stopwords
   splitter_1:
+    container_name: splitter_1
     build:
       context: ./src
       dockerfile: splitter/Dockerfile
@@ -807,19 +762,17 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
       AGGREGATION_AMOUNT: "3"
       FILTER_LANGUAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "1"
       INPUT_EXCHANGE: splitter
-      MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: splitter_output
-      PYTHONUNBUFFERED: "1"
       STOPWORDS_PATH: /stopwords
   splitter_2:
+    container_name: splitter_2
     build:
       context: ./src
       dockerfile: splitter/Dockerfile
@@ -827,17 +780,14 @@ services:
       rabbitmq:
         condition: service_healthy
         required: true
+    env_file: .env
     environment:
       AGGREGATION_AMOUNT: "3"
       FILTER_LANGUAGE_AMOUNT: "3"
       FILTER_YEAR_AMOUNT: "3"
-      HEARTBEAT_PORT: "9000"
-      MONITOR_AMOUNT: "3"
       ID: "2"
       INPUT_EXCHANGE: splitter
-      MOM_HOST: rabbitmq
       OUTPUT_EXCHANGE: splitter_output
-      PYTHONUNBUFFERED: "1"
       STOPWORDS_PATH: /stopwords
 volumes:
   gateway_storage: null

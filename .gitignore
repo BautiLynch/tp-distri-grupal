@@ -45,6 +45,8 @@ test-results/
 .env
 .env.*
 !.env.example
+# El .env de la raiz se commitea: tiene la configuracion comun de los servicios, sin datos sensibles.
+!/.env
 
 *.log
 logs/
