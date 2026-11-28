@@ -73,7 +73,9 @@ def scale_config(config, target, amount):
         for index in range(counts[group]):
             # Conservar ajustes particulares de replicas que ya existian.
             clone = deepcopy(replicas[group].get(index, replicas[group][0]))
-            clone.pop("container_name", None)
+            # El monitor reinicia por nombre de container: cada replica lleva el suyo.
+            if "container_name" in clone:
+                clone["container_name"] = f"{group}_{index}"
             clone.pop("scale", None)
             if "deploy" in clone:
                 clone["deploy"].pop("replicas", None)
@@ -145,6 +147,14 @@ def scale_config(config, target, amount):
     return config, counts
 
 
+def update_monitored(env_path, services):
+    """Reescribe MONITORED en el .env: los monitores vigilan todo menos los clientes y RabbitMQ."""
+    monitored = ",".join(name for name in services if not name.startswith("client_") and name != "rabbitmq")
+    lines = env_path.read_text(encoding="utf-8").splitlines()
+    lines = [f"MONITORED={monitored}" if line.startswith("MONITORED=") else line for line in lines]
+    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+
+
 def compose_config(path, *options):
     result = subprocess.run(
         ["docker", "compose", "--project-directory", str(path.parent), "-f", str(path), "config", *options],
@@ -182,7 +192,8 @@ def main():
         temporary.write_text(yaml, encoding="utf-8", newline="\n")
         compose_config(temporary, "--quiet")
         os.replace(temporary, path)
-        print(f"Actualizado {path.name}: " + ", ".join(f"{group}={count}" for group, count in counts.items()))
+        update_monitored(path.with_name(".env"), updated["services"])
+        print(f"Actualizado {path.name} y .env: " + ", ".join(f"{group}={count}" for group, count in counts.items()))
         print("Prepará los archivos de entrada de los clientes nuevos antes de ejecutar make up.")
     except (OSError, ValueError) as error:
         parser.exit(1, f"Error: {error}\n")

@@ -8,16 +8,15 @@ import threading
 import time
 
 from docker.errors import NotFound
-from common import middleware
-from common.message_protocol.internal import deserialize_msg
+from common.heartbeat import HeartbeatSender
+from common.message_protocol.internal import MsgType, deserialize_msg, serialize_msg
 from bully import BullyElection
-from gossip import Gossip
 
 ID = int(os.environ["ID"])
-MOM_HOST = os.environ["MOM_HOST"]
-MONITOR_AMOUNT = int(os.environ.get("MONITOR_AMOUNT", 3))
-INPUT_QUEUE = os.environ["INPUT_QUEUE"]
-GOSSIP_EXCHANGE = os.environ["GOSSIP_EXCHANGE"]
+NAME = f"monitor_{ID}"
+MONITOR_IPS = os.environ["MONITOR_IPS"].split(",")
+MONITORED = os.environ["MONITORED"].split(",")
+HEARTBEAT_PORT = int(os.environ["HEARTBEAT_PORT"])
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 HEARTBEAT_ALLOWED_MISSES = int(os.environ.get("HEARTBEAT_ALLOWED_MISSES", 3))
 ELECTION_TIMEOUT = float(os.environ.get("ELECTION_TIMEOUT", HEARTBEAT_INTERVAL))
@@ -32,211 +31,130 @@ class Monitor:
         self.stopping = False
         self.failed = False
         self.is_leader = False
-        self.leader_term = 0
-        self.containers = {}
-        self.worker_names = {}
-        self.heartbeat_consumer = None
-        self.leader_threads = []
-
-        self.gossip = Gossip(
-            ID, MONITOR_AMOUNT, MOM_HOST, GOSSIP_EXCHANGE,
-            HEARTBEAT_INTERVAL, HEARTBEAT_TIMEOUT, socket.gethostname(),
-            current_containers=self._current_containers,
-            on_containers=self._on_containers,
-            on_election_message=lambda msg_type, sender: self.bully.handle(msg_type, sender),
-            on_peer_timeout=self._on_peer_timeout,
-            on_failure=self._fail,
-        )
+        self.leader = None
+        now = time.monotonic()
+        self.last_seen = {name: now for name in MONITORED if name != NAME}
+        self.sock = None
+        other_monitors = [ip for index, ip in enumerate(MONITOR_IPS) if index != ID]
+        self.heartbeat = HeartbeatSender(other_monitors, HEARTBEAT_PORT, NAME, HEARTBEAT_INTERVAL)
         self.bully = BullyElection(
-            ID, MONITOR_AMOUNT, ELECTION_TIMEOUT,
-            send=self.gossip.send_election,
+            ID, len(MONITOR_IPS), ELECTION_TIMEOUT,
+            send=self._send_election,
             on_leader_change=self._on_leader_change,
         )
+        self.threads = [
+            threading.Thread(target=self._receive, name="receiver"),
+            threading.Thread(target=self._watch_heartbeats, name="watcher"),
+        ]
 
-    def _current_containers(self):
-        with self.condition:
-            now = time.monotonic()
-            result = []
-
-            for container_id, seen in self.containers.items():
-                age_seconds = now - seen
-                age_ms = int(age_seconds * 1000)
-
-                if age_ms < 0:
-                    age_ms = 0
-
-                worker_name = self.worker_names.get(container_id, container_id)
-                result.append((container_id, worker_name, age_ms))
-
-        return result
-
-    def _on_containers(self, sender, containers):
-        from_leader = sender == self.bully.leader_id
-        with self.condition:
-            now = time.monotonic()
-            last_seen = {}
-            for container_id, worker_name, age_ms in containers:
-                last_seen[container_id] = now - (age_ms / 1000)
-                self.worker_names[container_id] = worker_name
-
-            if self.is_leader:
-                for container, seen in last_seen.items():
-                    if container not in self.containers:
-                        logging.info(f"Learned {self.worker_names[container]} (container {container}) from monitor {sender}")
-                        self.containers[container] = self._with_grace(seen, now)
-                self.condition.notify_all()
-            elif from_leader:
-                self.containers = last_seen
-
-    def _on_peer_timeout(self, peer, container_id):
-        if peer == self.bully.leader_id:
-            self.bully.leader_lost(peer)
-        elif self.is_leader:
-            logging.info(f"Monitor {peer} gossip timeout")
-            self._restart(container_id, f"monitor_{peer}")
+    def _send_election(self, msg_type, target):
+        try:
+            self.sock.sendto(serialize_msg(msg_type, ID), (MONITOR_IPS[target], HEARTBEAT_PORT))
+        except OSError as e:
+            logging.debug(f"Could not send {msg_type.name} to monitor {target}: {e}")
 
     def _on_leader_change(self, leader):
         with self.condition:
-            if self.stopping:
-                return
-            if leader == ID:
-                self._become_leader_locked()
-            elif self.is_leader:
-                self._step_down_locked()
+            self.leader = leader
+            self.is_leader = leader == ID
+            self.condition.notify_all()
 
-
-    def _with_grace(self, last_seen, now):
-        return max(last_seen, now + HEARTBEAT_INTERVAL - HEARTBEAT_TIMEOUT)
-
-    def _become_leader_locked(self):
-        self.is_leader = True
-        self.leader_term += 1
-        now = time.monotonic()
-        self.containers = {c: self._with_grace(seen, now) for c, seen in self.containers.items()}
-        logging.info(f"Leader term {self.leader_term}: watching {len(self.containers)} known containers")
-
-        threads = [
-            threading.Thread(target=target, args=(self.leader_term,))
-            for target in (self._consume_heartbeats, self._watch_heartbeats)
-        ]
-        self.leader_threads = [t for t in self.leader_threads if t.is_alive()] + threads
-        for thread in threads:
-            thread.start()
-
-    def _step_down_locked(self):
-        logging.info("Stepping down as leader")
-        self.is_leader = False
-        self.leader_term += 1
-        if self.heartbeat_consumer is not None:
-            self.heartbeat_consumer.stop_consuming_threadsafe()
-        self.condition.notify_all()
-
-    def _consume_heartbeats(self, term):
-        consumer = None
+    def _receive(self):
         try:
-            consumer = middleware.MessageMiddlewareQueueRabbitMQ(MOM_HOST, INPUT_QUEUE)
-
-            with self.condition:
-                if self.stopping or term != self.leader_term:
-                    return
-                self.heartbeat_consumer = consumer
-
-            consumer.start_consuming(self._process_heartbeat)
+            while not self.stopping:
+                try:
+                    message, _ = self.sock.recvfrom(65535)
+                except socket.timeout:
+                    continue
+                msg_type, fields = deserialize_msg(message)
+                if msg_type == MsgType.HEARTBEAT:
+                    self._process_heartbeat(fields[0])
+                else:
+                    self.bully.handle(msg_type, fields[0])
 
         except Exception:
-            if not self.stopping:
-                logging.exception("Heartbeat consumer failed")
-                self._fail()
+            logging.exception("Receiver failed")
+            self._fail()
 
-        finally:
-            with self.condition:
-                if self.heartbeat_consumer is consumer:
-                    self.heartbeat_consumer = None
-            if consumer is not None:
-                try:
-                    consumer.close()
-                except Exception as e:
-                    logging.error(f"Error closing heartbeat consumer: {e}")
+    def _process_heartbeat(self, name):
+        logging.debug(f"Received heartbeat from {name}")
 
-    def _process_heartbeat(self, message, ack, nack):
-        try:
-            _, (container_id, worker_name, sent_at) = deserialize_msg(message)
-            seen = time.monotonic() - max(0, time.time() - sent_at)
-            logging.debug(f"Received heartbeat from {worker_name} (container {container_id})")
+        with self.condition:
+            self.last_seen[name] = time.monotonic()
+            self.condition.notify_all()
 
-            with self.condition:
-                self.worker_names[container_id] = worker_name
-                if self.is_leader:
-                    self.containers[container_id] = max(self.containers.get(container_id, seen), seen)
-                    self.condition.notify_all()
-        except Exception as e:
-            logging.error(f"Invalid heartbeat: {e}")
-        ack()
+    def _watched_locked(self):
+        if self.is_leader:
+            return list(self.last_seen)
+        leader_name = f"monitor_{self.leader}"
+        return [leader_name] if leader_name in self.last_seen else []
 
-    def _watch_heartbeats(self, term):
+    def _watch_heartbeats(self):
         while True:
             with self.condition:
-                if self.stopping or term != self.leader_term:
+                if self.stopping:
                     return
 
-                if not self.containers:
+                watched = self._watched_locked()
+                if not watched:
                     self.condition.wait()
                     continue
 
-                container = min(self.containers, key=self.containers.get)
-                remaining = self.containers[container] + HEARTBEAT_TIMEOUT - time.monotonic()
+                name = min(watched, key=self.last_seen.get)
+                remaining = self.last_seen[name] + HEARTBEAT_TIMEOUT - time.monotonic()
 
                 if remaining > 0:
                     self.condition.wait(timeout=remaining)
                     continue
 
-                self.containers[container] = time.monotonic()
-                worker_name = self.worker_names.get(container, container)
+                self.last_seen[name] = time.monotonic()
+                is_leader, leader = self.is_leader, self.leader
 
-            logging.info(f"{worker_name} heartbeat exceeded")
-            self._restart(container, worker_name)
+            if is_leader:
+                logging.info(f"{name} heartbeat exceeded")
+                self._restart(name)
+            else:
+                self.bully.leader_lost(leader)
 
-    def _restart(self, container_id, name):
-        threading.Thread(target=self._restart_container, args=(container_id, name)).start()
+    def _restart(self, name):
+        threading.Thread(target=self._restart_container, args=(name,)).start()
 
-    def _restart_container(self, container_id, name):
+    def _restart_container(self, name):
         try:
-            logging.info(f"Restarting {name} (container {container_id})")
-            client.containers.get(container_id).restart()
+            logging.info(f"Restarting {name}")
+            client.containers.get(name).restart()
         except NotFound:
-            logging.warning(f"{name} (container {container_id}) no longer exists")
+            logging.warning(f"Container {name} does not exist")
             with self.condition:
-                self.containers.pop(container_id, None)
-                self.worker_names.pop(container_id, None)
+                self.last_seen.pop(name, None)
         except Exception as e:
-            logging.error(f"Error restarting {name} (container {container_id}): {e}")
+            logging.error(f"Error restarting {name}: {e}")
 
     def _fail(self):
         self.failed = True
         self.stop_event.set()
 
     def start(self):
-        self.gossip.start()
-        threading.Thread(target=self._start_election).start()
-
-    def _start_election(self):
-        if self.gossip.wait_ready():
-            self.bully.start()
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind(("", HEARTBEAT_PORT))
+        self.sock.settimeout(1)
+        for thread in self.threads:
+            thread.start()
+        self.heartbeat.start()
+        self.bully.start()
 
     def close(self):
         with self.condition:
             self.stopping = True
             self.condition.notify_all()
-            consumer = self.heartbeat_consumer
 
-        if consumer is not None:
-            consumer.stop_consuming_threadsafe()
         self.bully.close()
-        self.gossip.close()
-
-        for thread in self.leader_threads:
+        self.heartbeat.stop()
+        for thread in self.threads:
             if thread.is_alive():
                 thread.join()
+        if self.sock is not None:
+            self.sock.close()
 
 
 def main():

@@ -1,5 +1,4 @@
 import os
-import socket
 import logging
 import sys
 
@@ -11,7 +10,8 @@ from common.message_protocol.internal import MsgType, deserialize_msg
 
 ID = os.environ["ID"]
 MOM_HOST = os.environ["MOM_HOST"]
-HEARTBEAT_QUEUE = os.environ["HEARTBEAT_QUEUE"]
+MONITOR_IPS = os.environ["MONITOR_IPS"].split(",")
+HEARTBEAT_PORT = int(os.environ["HEARTBEAT_PORT"])
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", 5))
 INPUT_EXCHANGE = os.environ["INPUT_EXCHANGE"]
 OUTPUT_EXCHANGE = os.environ["OUTPUT_EXCHANGE"]
@@ -27,7 +27,7 @@ if not (AGGREGATION_AMOUNT == FILTER_LANGUAGE_AMOUNT >= 1) or FILTER_YEAR_AMOUNT
 class Splitter:
     def __init__(self):
         self.heartbeat = HeartbeatSender(
-            MOM_HOST, HEARTBEAT_QUEUE, socket.gethostname(), f"splitter_{ID}", HEARTBEAT_INTERVAL
+            MONITOR_IPS, HEARTBEAT_PORT, f"splitter_{ID}", HEARTBEAT_INTERVAL
         )
         self.shutdown = GracefulShutdown()
         self.last_received = {}

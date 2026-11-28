@@ -17,7 +17,6 @@ class MsgType(IntEnum):
     BASELINE_END = auto()
     WORD_BATCH = auto()
     HEARTBEAT = auto()
-    GOSSIP = auto()
     ELECTION = auto()
     ELECTION_OK = auto()
     COORDINATOR = auto()
